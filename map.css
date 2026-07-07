@@ -211,6 +211,14 @@
 }
 .sdlmap-canvas { flex: 1 1 auto; height: 100%; min-width: 0; }
 
+/* Plain native-style map: no card framing, fills the block edge-to-edge like the
+   native Squarespace Map Block. */
+.sdlmap-plain .sdlmap-body {
+  border-radius: 0;
+  box-shadow: none;
+  border: none;
+}
+
 /* Sidebar */
 .sdlmap-sidebar {
   width: var(--sdlmap-sidebar-width);

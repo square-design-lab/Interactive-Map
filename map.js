@@ -14,7 +14,6 @@
     coordSource: "location",
     excerptTag: "map",
 
-    height: 500,
     mapStyle: "carto-voyager",
     defaultZoom: 13,
     autoFit: true,
@@ -41,7 +40,7 @@
     search: false,
     searchPlaceholder: "Search locations…",
 
-    categoryFilter: true,
+    categoryFilter: false,
     categoryLabel: "",
     allLabel: "All",
 
@@ -234,7 +233,14 @@
   function resolveContainer() {
     if (cfg.target === "native" || cfg.target === "auto") {
       var b = document.querySelector(".sqs-block-map .sqs-block-content, .map-block .sqs-block-content, .sqs-block-map");
-      if (b) { b.innerHTML = ""; b.classList.add("sdlmap-took-over"); return b; }
+      if (b) {
+        /* Capture the native map's height (set in the Squarespace editor) so we
+           render at exactly that size instead of forcing a fixed height. */
+        var nh = b.offsetHeight;
+        if (nh && nh > 80) cfg._nativeHeight = nh;
+        b.innerHTML = ""; b.classList.add("sdlmap-took-over"); b.dataset.sdlmapNative = "1";
+        return b;
+      }
       if (cfg.target === "native") warn("No Map Block found on page.");
     }
     var el = document.getElementById(cfg.containerId);
@@ -245,13 +251,19 @@
 
   /* -------------------------------------------------- Render */
   function render(host, records) {
-    var root = document.createElement("div");
-    root.className = "sdlmap-root" + (cfg.sidebar ? " sdlmap-has-sidebar sdlmap-sidebar-" + cfg.sidebarPosition : "");
-    root.style.setProperty("--sdlmap-height", (parseInt(cfg.height, 10) || 500) + "px");
-    root.style.setProperty("--sdlmap-sidebar-width", (parseInt(cfg.sidebarWidth, 10) || 340) + "px");
-
     /* ---------- Controls area (search + filters) ---------- */
     var hasControls = cfg.search || cfg.categoryFilter || cfg.tagFilter;
+
+    var root = document.createElement("div");
+    /* "plain" = a bare native-style map (no controls, no sidebar): fills the
+       native block edge-to-edge with no card framing, matching the Squarespace editor. */
+    var plain = !hasControls && !cfg.sidebar;
+    root.className = "sdlmap-root"
+      + (cfg.sidebar ? " sdlmap-has-sidebar sdlmap-sidebar-" + cfg.sidebarPosition : "")
+      + (plain ? " sdlmap-plain" : "");
+    root.style.setProperty("--sdlmap-height", (parseInt(cfg._nativeHeight, 10) || 500) + "px");
+    root.style.setProperty("--sdlmap-sidebar-width", (parseInt(cfg.sidebarWidth, 10) || 340) + "px");
+
     var controls = null;
     if (hasControls) {
       controls = document.createElement("div");

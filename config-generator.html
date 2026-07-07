@@ -200,9 +200,9 @@ input[type=range].slider-input::-webkit-slider-thumb{appearance:none;width:16px;
             <option value="osm">OpenStreetMap</option>
           </select>
         </div>
-        <div class="control-row grid2">
-          <div><label>Height (px)</label><input type="number" id="height" value="500" min="200" max="1200"></div>
-          <div><label>Default Zoom</label><input type="number" id="defaultZoom" value="13" min="1" max="19"></div>
+        <div class="control-row">
+          <label>Default Zoom</label><input type="number" id="defaultZoom" value="13" min="1" max="19">
+          <div class="helper-text">Map size is controlled by the native Map Block in the Squarespace editor — drag its handles to set width &amp; height.</div>
         </div>
         <div class="toggle-row"><label>Auto-fit all pins on load</label><input type="checkbox" id="autoFit" checked></div>
         <div class="toggle-row"><label>Scroll-wheel zoom</label><input type="checkbox" id="scrollWheelZoom"></div>
@@ -257,7 +257,7 @@ input[type=range].slider-input::-webkit-slider-thumb{appearance:none;width:16px;
     <div class="group">
       <div class="group-header" onclick="togGroup(this)">Category Filter</div>
       <div class="group-body">
-        <div class="toggle-row"><label class="bold">Enable category filter</label><input type="checkbox" id="categoryFilter" checked></div>
+        <div class="toggle-row"><label class="bold">Enable category filter</label><input type="checkbox" id="categoryFilter"></div>
         <div id="catOpts" class="sub">
           <div class="control-row">
             <label>Filter Label <span style="color:#bbb;font-weight:400;">(optional)</span></label>
@@ -422,7 +422,6 @@ function readConfig(){
     coordSource: C("coordSource").value,
     excerptTag: C("excerptTag").value.trim()||"map",
     mapStyle: C("mapStyle").value,
-    height: parseInt(C("height").value,10)||500,
     defaultZoom: parseInt(C("defaultZoom").value,10)||13,
     autoFit: C("autoFit").checked,
     scrollWheelZoom: C("scrollWheelZoom").checked,
@@ -464,12 +463,12 @@ function readConfig(){
 /* Only emit keys that differ from defaults */
 var DEFS={
   target:"auto",containerId:"sdl-map",coordSource:"location",excerptTag:"map",
-  mapStyle:"carto-voyager",height:500,defaultZoom:13,autoFit:true,scrollWheelZoom:false,
+  mapStyle:"carto-voyager",defaultZoom:13,autoFit:true,scrollWheelZoom:false,
   showZoomControl:true,cluster:false,markerType:"pin",markerColor:"#e5484d",markerSize:42,
   markerImageUrl:"",popupWidth:320,popupImage:true,popupCategory:false,popupAddress:false,
   popupExcerpt:true,excerptLength:120,popupReadMore:true,readMoreText:"Read more",
   viewOnMap:false,viewOnMapText:"View on Google Maps",search:false,
-  searchPlaceholder:"Search locations…",categoryFilter:true,categoryLabel:"",allLabel:"All",
+  searchPlaceholder:"Search locations…",categoryFilter:false,categoryLabel:"",allLabel:"All",
   tagFilter:false,tagLabel:"",tagFilterType:"pills",allTagLabel:"All",
   priceMin:0,priceMax:1000000,pricePrefix:"$",priceStep:1000,
   sidebar:false,sidebarPosition:"left",sidebarWidth:340
@@ -548,12 +547,14 @@ function renderPreview(){
   host.innerHTML="";
   if(previewMap){try{previewMap.remove();}catch(e){} previewMap=null;}
 
+  var hasControls=cfg.search||cfg.categoryFilter||cfg.tagFilter;
+  var plain=!hasControls&&!cfg.sidebar;
+
   var root=document.createElement("div");
-  root.className="sdlmap-root"+(cfg.sidebar?" sdlmap-has-sidebar sdlmap-sidebar-"+cfg.sidebarPosition:"");
-  root.style.setProperty("--sdlmap-height",cfg.height+"px");
+  root.className="sdlmap-root"+(cfg.sidebar?" sdlmap-has-sidebar sdlmap-sidebar-"+cfg.sidebarPosition:"")+(plain?" sdlmap-plain":"");
+  root.style.setProperty("--sdlmap-height","460px");
   root.style.setProperty("--sdlmap-sidebar-width",cfg.sidebarWidth+"px");
 
-  var hasControls=cfg.search||cfg.categoryFilter||cfg.tagFilter;
   var controls=null;
   if(hasControls){controls=document.createElement("div");controls.className="sdlmap-controls";root.appendChild(controls);}
 
