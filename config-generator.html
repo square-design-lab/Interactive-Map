@@ -1,0 +1,608 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>SDL Dynamic Map — Config Generator v1.0</title>
+
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.css">
+<link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.Default.css">
+<link rel="stylesheet" href="map.css">
+
+<style>
+:root {
+  --bg-body:#F5F5F7; --bg-sidebar:#FFFFFF; --text-main:#1C1C1E; --text-secondary:#666;
+  --text-tertiary:#999; --border-light:#E5E5E5; --border-hover:#D4D4D4; --border-active:#18181B;
+  --accent:#18181B; --accent-hover:#09090B; --accent-contrast:#FFF;
+  --shadow-sm:0 1px 2px rgba(0,0,0,.04); --shadow-md:0 4px 6px -1px rgba(0,0,0,.05),0 2px 4px -1px rgba(0,0,0,.03);
+  --shadow-lg:0 10px 30px rgba(0,0,0,.08);
+  --radius-sm:6px; --radius-md:8px; --radius-lg:12px; --sidebar-width:380px; --header-height:60px;
+}
+* { box-sizing:border-box; outline:none; }
+body { font-family:'Inter',sans-serif; background:var(--bg-body); color:var(--text-main); margin:0; padding:0;
+  height:100vh; display:flex; overflow:hidden; font-size:13px; -webkit-font-smoothing:antialiased; }
+
+/* Sidebar */
+.sidebar { width:var(--sidebar-width); background:var(--bg-sidebar); border-right:1px solid var(--border-light);
+  display:flex; flex-direction:column; z-index:20; }
+.sidebar-header { height:var(--header-height); padding:0 24px; border-bottom:1px solid var(--border-light);
+  display:flex; align-items:center; justify-content:space-between; }
+.sidebar-header h2 { font-size:15px; font-weight:700; margin:0; display:flex; align-items:center; gap:10px; letter-spacing:-.02em; }
+.brand-icon { width:30px; height:30px; background:var(--accent); color:#fff; border-radius:8px; display:inline-flex;
+  align-items:center; justify-content:center; flex-shrink:0; }
+.badge { font-size:10px; background:#F4F4F5; padding:2px 7px; border-radius:4px; color:#52525B; font-weight:600; border:1px solid #D4D4D8; }
+.sidebar-content { flex:1; overflow-y:auto; padding:24px; }
+.sidebar-content::-webkit-scrollbar { width:6px; }
+.sidebar-content::-webkit-scrollbar-thumb { background:#E5E5E5; border-radius:3px; }
+
+.group { margin-bottom:20px; border-bottom:1px solid #F0F0F0; padding-bottom:20px; }
+.group:last-child { border-bottom:none; }
+.group-header { font-size:12px; font-weight:600; text-transform:uppercase; letter-spacing:.07em; color:var(--text-tertiary);
+  margin-bottom:12px; cursor:pointer; display:flex; align-items:center; justify-content:space-between; transition:color .2s; }
+.group-header:hover { color:var(--text-main); }
+.group-header::after { content:''; width:6px; height:6px; border-right:1.5px solid currentColor; border-bottom:1.5px solid currentColor;
+  transform:rotate(45deg); transition:transform .2s; margin-right:4px; }
+.group.open .group-header::after { transform:rotate(-135deg); }
+.group-body { display:none; }
+.group.open .group-body { display:block; animation:slideIn .2s ease-out; }
+@keyframes slideIn { from{opacity:0;transform:translateY(-5px);} to{opacity:1;transform:translateY(0);} }
+
+.control-row { margin-bottom:16px; }
+label { display:block; font-size:13px; font-weight:500; margin-bottom:6px; color:var(--text-main); }
+.helper-text { font-size:11px; color:var(--text-secondary); margin-top:6px; line-height:1.4; }
+input[type=text], input[type=number], select {
+  width:100%; height:36px; padding:0 10px; font-family:inherit; font-size:13px; border:1px solid var(--border-light);
+  border-radius:var(--radius-sm); background:#fff; color:var(--text-main); transition:all .15s; appearance:none; }
+input:hover, select:hover { border-color:var(--border-hover); }
+input:focus, select:focus { border-color:var(--border-active); box-shadow:0 0 0 3px rgba(0,0,0,.08); }
+select { background-image:url("data:image/svg+xml;charset=UTF-8,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23666' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3e%3cpolyline points='6 9 12 15 18 9'%3e%3c/polyline%3e%3c/svg%3e");
+  background-repeat:no-repeat; background-position:right 8px center; background-size:14px; padding-right:30px; }
+
+.toggle-row { display:flex; align-items:center; justify-content:space-between; margin-bottom:12px; min-height:24px; }
+.toggle-row label { margin:0; font-weight:400; color:var(--text-secondary); }
+input[type=checkbox] { appearance:none; width:36px; height:20px; background:#E5E5E5; border-radius:20px; position:relative;
+  cursor:pointer; transition:.2s; border:none; flex-shrink:0; }
+input[type=checkbox]::after { content:''; position:absolute; top:2px; left:2px; width:16px; height:16px; background:#fff;
+  border-radius:50%; box-shadow:0 1px 2px rgba(0,0,0,.2); transition:.2s cubic-bezier(.4,0,.2,1); }
+input[type=checkbox]:checked { background:var(--accent); }
+input[type=checkbox]:checked::after { transform:translateX(16px); }
+
+.color-row { display:flex; flex-direction:column; gap:8px; background:#FAFAFA; padding:12px; border-radius:var(--radius-md); border:1px solid var(--border-light); }
+.color-chip { display:flex; align-items:center; justify-content:space-between; }
+.color-chip .color-label { font-size:12px; font-weight:500; }
+input[type=color] { width:28px; height:28px; padding:0; border:1.5px solid #B8B8B8; border-radius:50%; overflow:hidden; cursor:pointer; background:none; }
+input[type=color]::-webkit-color-swatch-wrapper { padding:0; }
+input[type=color]::-webkit-color-swatch { border:none; border-radius:50%; }
+.grid2 { display:grid; grid-template-columns:1fr 1fr; gap:10px; }
+.sub-panel { border-left:2px solid var(--border-light); padding-left:12px; margin-bottom:16px; }
+
+/* Main */
+.main-content { flex:1; display:flex; flex-direction:column; background:#F5F5F7; position:relative; }
+.topbar { height:var(--header-height); padding:0 24px; border-bottom:1px solid var(--border-light); background:#fff;
+  display:flex; align-items:center; justify-content:space-between; }
+.device-toggle { background:#F2F2F2; padding:2px; border-radius:6px; display:flex; }
+.device-toggle button { border:none; background:transparent; padding:6px 12px; font-size:12px; font-weight:500;
+  color:var(--text-secondary); cursor:pointer; border-radius:4px; transition:.2s; }
+.device-toggle button.active { background:#fff; color:var(--text-main); box-shadow:0 1px 2px rgba(0,0,0,.1); }
+.copy-btn { background:var(--accent); color:var(--accent-contrast); border:none; padding:9px 20px; border-radius:7px;
+  font-weight:600; font-size:13px; cursor:pointer; display:flex; align-items:center; gap:7px; transition:transform .1s,background .2s;
+  box-shadow:0 1px 3px rgba(0,0,0,.18); }
+.copy-btn:hover { background:var(--accent-hover); }
+.copy-btn:active { transform:scale(.97); }
+.copy-btn.copied { background:#0EA5E9; }
+
+.preview-container { flex:1; overflow-y:auto; padding:40px; display:flex; justify-content:center; align-items:flex-start;
+  background-image:radial-gradient(#E1E1E1 1px, transparent 1px); background-size:20px 20px; }
+#previewFrame { background:#fff; width:100%; max-width:1100px; min-height:560px; box-shadow:var(--shadow-lg);
+  border-radius:var(--radius-lg); padding:40px; transition:width .3s cubic-bezier(.25,.8,.25,1); display:flex;
+  flex-direction:column; border:1px solid var(--border-light); }
+#previewFrame.mobile { width:390px; padding:20px; border-radius:30px; border:8px solid #333; }
+.preview-title { font-size:11px; text-transform:uppercase; letter-spacing:.08em; color:#aaa; margin-bottom:16px; font-weight:600; }
+
+.code-drawer { height:230px; background:#0D0D0D; color:#E1E1E1; display:flex; flex-direction:column;
+  border-top:1px solid var(--border-light); font-family:'JetBrains Mono',monospace; }
+.drawer-header { padding:10px 24px; background:#1A1A1A; border-bottom:1px solid #333; display:flex; align-items:center; justify-content:space-between; }
+.drawer-header h3 { margin:0; font-size:11px; text-transform:uppercase; letter-spacing:.05em; color:#888; }
+#codeOutput { flex:1; padding:20px 24px; margin:0; overflow:auto; font-size:12px; line-height:1.6; color:#A9B7C6; white-space:pre; }
+#codeOutput .hl-key{color:#E5BF78;} #codeOutput .hl-str{color:#87C98F;} #codeOutput .hl-bool{color:#79B8FF;}
+#codeOutput .hl-num{color:#FF9D7C;} #codeOutput .hl-tag{color:#6B8CAE;} #codeOutput .hl-com{color:#6A7079;}
+
+/* Preview map sizing */
+#mapPreview { width:100%; }
+.pv-note { font-size:11px; color:#aaa; margin-top:14px; text-align:center; }
+
+.mobile-tabs { display:none; }
+.mobile-copy-btn { display:none; }
+@media (max-width:1023px) {
+  body { flex-direction:column; }
+  .main-content { display:none; }
+  .sidebar { position:fixed; top:0; left:0; right:0; bottom:calc(68px + env(safe-area-inset-bottom)); width:100%;
+    border-right:none; display:none; flex-direction:column; z-index:50; }
+  .sidebar-header { flex-shrink:0; }
+  .mobile-tabs { display:flex; position:fixed; bottom:0; left:0; right:0; background:#fff; border-top:1px solid #E5E5E5;
+    z-index:100; height:68px; padding:8px 12px; gap:6px; }
+  .tab-btn { flex:1; border:none; background:transparent; color:var(--text-tertiary); font-size:11px; font-weight:500;
+    font-family:inherit; cursor:pointer; border-radius:10px; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:4px; }
+  .tab-btn.active { background:var(--accent); color:#fff; }
+  .mobile-copy-btn { display:flex; }
+  body.tab-edit .sidebar { display:flex; }
+  body.tab-preview .main-content { display:flex; position:fixed; top:0; left:0; right:0; bottom:68px; }
+  body.tab-preview .code-drawer { display:none; }
+  body.tab-code .main-content { display:flex; position:fixed; top:0; left:0; right:0; bottom:68px; }
+  body.tab-code .preview-container { display:none; }
+  body.tab-code .code-drawer { flex:1; height:auto; }
+}
+</style>
+</head>
+
+<body class="tab-edit">
+
+<div class="mobile-tabs">
+  <button class="tab-btn active" onclick="setTab('edit')">Settings</button>
+  <button class="tab-btn" onclick="setTab('preview')">Preview</button>
+  <button class="tab-btn" onclick="setTab('code')">Code</button>
+</div>
+
+<!-- ===================== SIDEBAR ===================== -->
+<div class="sidebar">
+  <div class="sidebar-header">
+    <h2>
+      <span class="brand-icon">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg>
+      </span>
+      Dynamic Map <span class="badge">v1.0</span>
+    </h2>
+    <button class="copy-btn mobile-copy-btn" onclick="copyCode()">Copy</button>
+  </div>
+
+  <div class="sidebar-content">
+
+    <!-- DATA SOURCE -->
+    <div class="group open">
+      <div class="group-header" onclick="togGroup(this)">Data Source</div>
+      <div class="group-body">
+        <div class="control-row">
+          <label>Blog Collection URL</label>
+          <input type="text" id="collectionUrl" value="/blog">
+          <div class="helper-text">The URL slug of the blog holding your locations (one post = one pin).</div>
+        </div>
+        <div class="control-row">
+          <label>Coordinate Source</label>
+          <select id="coordSource">
+            <option value="location" selected>Location Field (native geocoding)</option>
+            <option value="excerpt">Excerpt lat,lng token</option>
+            <option value="auto">Auto (excerpt overrides location)</option>
+          </select>
+          <div class="helper-text">Where pin coordinates come from. See the token setting below for the excerpt format.</div>
+        </div>
+        <div class="control-row" id="excerptTagRow">
+          <label>Excerpt Token Name</label>
+          <input type="text" id="excerptTag" value="map">
+          <div class="helper-text">In a post excerpt write <code>[map: 40.7484, -73.9857]</code>. Token name is customisable.</div>
+        </div>
+        <div class="control-row">
+          <label>Filter / Category Field</label>
+          <select id="filterSource">
+            <option value="categories" selected>Categories</option>
+            <option value="tags">Tags</option>
+          </select>
+        </div>
+      </div>
+    </div>
+
+    <!-- PLACEMENT -->
+    <div class="group">
+      <div class="group-header" onclick="togGroup(this)">Placement</div>
+      <div class="group-body">
+        <div class="control-row">
+          <label>Where to Render</label>
+          <select id="target">
+            <option value="auto" selected>Auto — take over native Map Block, else Code Block</option>
+            <option value="native">Native Map Block only</option>
+            <option value="container">Code Block container only</option>
+          </select>
+          <div class="helper-text">"Auto" replaces the native Map Block on the page; falls back to a Code Block div.</div>
+        </div>
+        <div class="control-row" id="containerIdRow">
+          <label>Container ID</label>
+          <input type="text" id="containerId" value="sdl-map">
+          <div class="helper-text">Add a Code Block containing <code>&lt;div id="sdl-map"&gt;&lt;/div&gt;</code> where you want the map.</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- MAP -->
+    <div class="group">
+      <div class="group-header" onclick="togGroup(this)">Map</div>
+      <div class="group-body">
+        <div class="control-row">
+          <label>Tile Style</label>
+          <select id="mapStyle">
+            <option value="carto-voyager" selected>Carto Voyager (colour)</option>
+            <option value="carto-light">Carto Light (minimal)</option>
+            <option value="carto-dark">Carto Dark</option>
+            <option value="osm">OpenStreetMap Standard</option>
+          </select>
+        </div>
+        <div class="control-row grid2">
+          <div><label>Height (px)</label><input type="number" id="height" value="500"></div>
+          <div><label>Default Zoom</label><input type="number" id="defaultZoom" value="13" min="1" max="19"></div>
+        </div>
+        <div class="toggle-row"><label>Auto-fit to all pins</label><input type="checkbox" id="autoFit" checked></div>
+        <div class="toggle-row"><label>Scroll-wheel zoom</label><input type="checkbox" id="scrollWheelZoom"></div>
+        <div class="toggle-row"><label>Show zoom control</label><input type="checkbox" id="showZoomControl" checked></div>
+        <div class="toggle-row"><label>Cluster nearby pins</label><input type="checkbox" id="cluster" checked></div>
+      </div>
+    </div>
+
+    <!-- MARKERS -->
+    <div class="group">
+      <div class="group-header" onclick="togGroup(this)">Markers</div>
+      <div class="group-body">
+        <div class="control-row">
+          <label>Marker Type</label>
+          <select id="markerType">
+            <option value="pin" selected>Coloured Pin</option>
+            <option value="image">Custom Image</option>
+          </select>
+        </div>
+        <div class="color-row" id="markerColorRow">
+          <div class="color-chip"><span class="color-label">Pin Colour</span><input type="color" id="markerColor" value="#E5484D"></div>
+        </div>
+        <div class="control-row" id="markerImageRow" style="display:none;">
+          <label>Marker Image URL</label>
+          <input type="text" id="markerImageUrl" placeholder="https://…/pin.png">
+          <div class="helper-text">PNG/SVG with transparent background works best.</div>
+        </div>
+        <div class="control-row" style="margin-top:14px;">
+          <label>Marker Size — <span id="markerSizeVal">42</span>px</label>
+          <input type="range" id="markerSize" min="20" max="80" value="42" style="width:100%;">
+        </div>
+      </div>
+    </div>
+
+    <!-- POPUP -->
+    <div class="group">
+      <div class="group-header" onclick="togGroup(this)">Pin Popup</div>
+      <div class="group-body">
+        <div class="toggle-row"><label>Show image</label><input type="checkbox" id="popupImage" checked></div>
+        <div class="toggle-row"><label>Show category</label><input type="checkbox" id="popupCategory" checked></div>
+        <div class="toggle-row"><label>Show address</label><input type="checkbox" id="popupAddress" checked></div>
+        <div class="toggle-row"><label>Show excerpt</label><input type="checkbox" id="popupExcerpt" checked></div>
+        <div class="control-row" id="excerptLengthRow">
+          <label>Excerpt Length (chars)</label>
+          <input type="number" id="excerptLength" value="110">
+        </div>
+        <div class="toggle-row"><label>"Read more" link</label><input type="checkbox" id="popupReadMore" checked></div>
+        <div class="control-row" id="readMoreTextRow"><label>Read-more Text</label><input type="text" id="readMoreText" value="Read more"></div>
+        <div class="toggle-row"><label>"View on Google Maps" link</label><input type="checkbox" id="viewOnMap" checked></div>
+        <div class="control-row" id="viewOnMapTextRow"><label>Google Maps Link Text</label><input type="text" id="viewOnMapText" value="View on Google Maps"></div>
+      </div>
+    </div>
+
+    <!-- CATEGORY FILTER -->
+    <div class="group">
+      <div class="group-header" onclick="togGroup(this)">Category Filter Bar</div>
+      <div class="group-body">
+        <div class="toggle-row"><label>Enable filter bar</label><input type="checkbox" id="categoryFilter" checked></div>
+        <div class="control-row" id="allLabelRow"><label>"All" Button Label</label><input type="text" id="allLabel" value="All"></div>
+      </div>
+    </div>
+
+    <!-- SIDEBAR -->
+    <div class="group">
+      <div class="group-header" onclick="togGroup(this)">Location Sidebar</div>
+      <div class="group-body">
+        <div class="toggle-row"><label>Show sidebar list</label><input type="checkbox" id="sidebar"></div>
+        <div id="sidebarOpts" style="display:none;">
+          <div class="control-row">
+            <label>Sidebar Position</label>
+            <select id="sidebarPosition">
+              <option value="left" selected>Left</option>
+              <option value="right">Right</option>
+            </select>
+          </div>
+          <div class="control-row"><label>Sidebar Width (px)</label><input type="number" id="sidebarWidth" value="340"></div>
+        </div>
+        <div class="helper-text">A scrollable list of locations beside the map; clicking a card flies to its pin.</div>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<!-- ===================== MAIN ===================== -->
+<div class="main-content">
+  <div class="topbar">
+    <div class="device-toggle">
+      <button id="btnDesktop" class="active" onclick="setDevice('desktop')">Desktop</button>
+      <button id="btnMobile" onclick="setDevice('mobile')">Mobile</button>
+    </div>
+    <button class="copy-btn" id="copyBtn" onclick="copyCode()">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/><rect x="8" y="2" width="8" height="4" rx="1"/></svg>
+      Copy Code
+    </button>
+  </div>
+
+  <div class="preview-container">
+    <div id="previewFrame">
+      <div class="preview-title">Live Preview — sample locations</div>
+      <div id="mapPreview"></div>
+      <div class="pv-note">Preview uses sample pins in Valencia. Your live map reads real posts from the collection URL.</div>
+    </div>
+  </div>
+
+  <div class="code-drawer">
+    <div class="drawer-header"><h3>Embed Code — paste into Settings → Advanced → Code Injection (Footer)</h3></div>
+    <pre id="codeOutput"></pre>
+  </div>
+</div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://unpkg.com/leaflet.markercluster@1.5.3/dist/leaflet.markercluster.js"></script>
+<script>
+/* ---------------- Sample data for preview (Valencia-ish) ---------------- */
+var SAMPLE = [
+  { title:"Central Market", lat:39.4738, lng:-0.3797, cat:"Food", addr:"Plaça de la Ciutat de Bruges", img:"https://picsum.photos/seed/mkt/400/300", exc:"Historic modernist market hall in the heart of the old town." },
+  { title:"City of Arts & Sciences", lat:39.4540, lng:-0.3526, cat:"Landmark", addr:"Av. del Professor López Piñero 7", img:"https://picsum.photos/seed/arts/400/300", exc:"Futuristic architectural complex with an oceanarium and planetarium." },
+  { title:"Turia Gardens", lat:39.4699, lng:-0.3663, cat:"Park", addr:"Jardí del Túria", img:"https://picsum.photos/seed/park/400/300", exc:"A nine-kilometre green park in a former riverbed." },
+  { title:"Malvarrosa Beach", lat:39.4790, lng:-0.3253, cat:"Beach", addr:"Passeig Marítim", img:"https://picsum.photos/seed/beach/400/300", exc:"Wide sandy city beach lined with paella restaurants." },
+  { title:"Valencia Cathedral", lat:39.4758, lng:-0.3752, cat:"Landmark", addr:"Plaça de l'Almoina", img:"https://picsum.photos/seed/cath/400/300", exc:"Gothic cathedral said to hold the Holy Chalice." },
+  { title:"Ruzafa District", lat:39.4610, lng:-0.3760, cat:"Food", addr:"Barri de Russafa", img:"https://picsum.photos/seed/ruz/400/300", exc:"Trendy neighbourhood full of cafés, bars and boutiques." }
+];
+var TILES = {
+  "osm":{url:"https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",attr:"&copy; OpenStreetMap"},
+  "carto-light":{url:"https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png",attr:"&copy; CARTO"},
+  "carto-dark":{url:"https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png",attr:"&copy; CARTO"},
+  "carto-voyager":{url:"https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png",attr:"&copy; CARTO"}
+};
+
+/* ---------------- Read config from form ---------------- */
+function C(id){ return document.getElementById(id); }
+function readConfig(){
+  return {
+    collectionUrl: C("collectionUrl").value.trim() || "/blog",
+    target: C("target").value,
+    containerId: C("containerId").value.trim() || "sdl-map",
+    coordSource: C("coordSource").value,
+    excerptTag: C("excerptTag").value.trim() || "map",
+    filterSource: C("filterSource").value,
+    mapStyle: C("mapStyle").value,
+    height: parseInt(C("height").value,10) || 500,
+    defaultZoom: parseInt(C("defaultZoom").value,10) || 13,
+    autoFit: C("autoFit").checked,
+    scrollWheelZoom: C("scrollWheelZoom").checked,
+    showZoomControl: C("showZoomControl").checked,
+    cluster: C("cluster").checked,
+    markerType: C("markerType").value,
+    markerColor: C("markerColor").value,
+    markerSize: parseInt(C("markerSize").value,10) || 42,
+    markerImageUrl: C("markerImageUrl").value.trim(),
+    popupImage: C("popupImage").checked,
+    popupCategory: C("popupCategory").checked,
+    popupAddress: C("popupAddress").checked,
+    popupExcerpt: C("popupExcerpt").checked,
+    excerptLength: parseInt(C("excerptLength").value,10) || 110,
+    popupReadMore: C("popupReadMore").checked,
+    readMoreText: C("readMoreText").value,
+    viewOnMap: C("viewOnMap").checked,
+    viewOnMapText: C("viewOnMapText").value,
+    categoryFilter: C("categoryFilter").checked,
+    allLabel: C("allLabel").value || "All",
+    sidebar: C("sidebar").checked,
+    sidebarPosition: C("sidebarPosition").value,
+    sidebarWidth: parseInt(C("sidebarWidth").value,10) || 340
+  };
+}
+
+/* Only emit non-default keys to keep the snippet tidy */
+var SNIPPET_DEFAULTS = {
+  target:"auto", containerId:"sdl-map", coordSource:"location", excerptTag:"map", filterSource:"categories",
+  mapStyle:"carto-voyager", height:500, defaultZoom:13, autoFit:true, scrollWheelZoom:false, showZoomControl:true,
+  cluster:true, markerType:"pin", markerColor:"#e5484d", markerSize:42, markerImageUrl:"",
+  popupImage:true, popupCategory:true, popupAddress:true, popupExcerpt:true, excerptLength:110,
+  popupReadMore:true, readMoreText:"Read more", viewOnMap:true, viewOnMapText:"View on Google Maps",
+  categoryFilter:true, allLabel:"All", sidebar:false, sidebarPosition:"left", sidebarWidth:340
+};
+
+function buildConfigObject(cfg){
+  var out = { collectionUrl: cfg.collectionUrl };
+  for (var k in SNIPPET_DEFAULTS){
+    if (cfg[k] !== SNIPPET_DEFAULTS[k]) out[k] = cfg[k];
+  }
+  return out;
+}
+
+/* ---------------- Code generation ---------------- */
+var CDN = "https://cdn.jsdelivr.net/gh/square-design-lab/Map@main/";
+function generateCode(){
+  var cfg = readConfig();
+  var obj = buildConfigObject(cfg);
+  var json = JSON.stringify(obj, null, 2);
+  var code =
+"<!-- SDL Dynamic Map — Square Design Lab -->\n" +
+'<link rel="stylesheet" href="'+CDN+'map.css">\n' +
+"<script>\n" +
+"window.SDL_MAP_CONFIG = " + json + ";\n" +
+"<\/script>\n" +
+'<script src="'+CDN+'map.js" defer><\/script>';
+  return code;
+}
+
+function highlight(code){
+  var e = code.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
+  e = e.replace(/(&lt;!--.*?--&gt;)/g,'<span class="hl-com">$1</span>');
+  e = e.replace(/(&lt;\/?[a-zA-Z]+)([^&]*?)(&gt;)/g,'<span class="hl-tag">$1$2$3</span>');
+  e = e.replace(/("(?:[^"\\]|\\.)*")(\s*:)/g,'<span class="hl-key">$1</span>$2');
+  e = e.replace(/:\s*("(?:[^"\\]|\\.)*")/g,': <span class="hl-str">$1</span>');
+  e = e.replace(/:\s*(true|false)/g,': <span class="hl-bool">$1</span>');
+  e = e.replace(/:\s*(-?\d+\.?\d*)/g,': <span class="hl-num">$1</span>');
+  return e;
+}
+
+/* ---------------- Preview map ---------------- */
+var previewMap = null;
+function makeIcon(cfg){
+  var size = cfg.markerSize;
+  if (cfg.markerType==="image" && cfg.markerImageUrl){
+    return L.icon({ iconUrl:cfg.markerImageUrl, iconSize:[size,size], iconAnchor:[size/2,size], popupAnchor:[0,-size+4], className:"sdlmap-custom-icon" });
+  }
+  var h = Math.round(size*32/24);
+  var svg='<svg viewBox="0 0 24 32" width="'+size+'" height="'+h+'" xmlns="http://www.w3.org/2000/svg">'+
+    '<path d="M12 0C5.4 0 0 5.4 0 12c0 8.4 12 20 12 20s12-11.6 12-20C24 5.4 18.6 0 12 0z" fill="'+cfg.markerColor+'"/>'+
+    '<circle cx="12" cy="12" r="4.5" fill="#fff"/></svg>';
+  return L.divIcon({ html:svg, className:"sdlmap-pin", iconSize:[size,h], iconAnchor:[size/2,h], popupAnchor:[0,-h+6] });
+}
+function popupHtml(rec,cfg){
+  var p=['<div class="sdlmap-popup">'];
+  if(cfg.popupImage) p.push('<div class="sdlmap-popup-img" style="background-image:url('+rec.img+')"></div>');
+  p.push('<div class="sdlmap-popup-body">');
+  if(cfg.popupCategory) p.push('<div class="sdlmap-popup-cat">'+rec.cat+'</div>');
+  p.push('<a class="sdlmap-popup-title" href="#">'+rec.title+'</a>');
+  if(cfg.popupAddress) p.push('<div class="sdlmap-popup-addr">'+rec.addr+'</div>');
+  if(cfg.popupExcerpt) p.push('<div class="sdlmap-popup-exc">'+rec.exc.slice(0,cfg.excerptLength)+'</div>');
+  var links=[];
+  if(cfg.popupReadMore) links.push('<a class="sdlmap-popup-more" href="#">'+cfg.readMoreText+'</a>');
+  if(cfg.viewOnMap) links.push('<a class="sdlmap-popup-gmap" href="#">'+cfg.viewOnMapText+'</a>');
+  if(links.length) p.push('<div class="sdlmap-popup-links">'+links.join('')+'</div>');
+  p.push('</div></div>');
+  return p.join('');
+}
+
+function renderPreview(){
+  var cfg = readConfig();
+  var host = C("mapPreview");
+  host.innerHTML = "";
+
+  var root=document.createElement("div");
+  root.className="sdlmap-root"+(cfg.sidebar?" sdlmap-has-sidebar sdlmap-sidebar-"+cfg.sidebarPosition:"");
+  root.style.setProperty("--sdlmap-height", cfg.height+"px");
+  root.style.setProperty("--sdlmap-sidebar-width", cfg.sidebarWidth+"px");
+
+  var cats=[]; SAMPLE.forEach(function(r){ if(cats.indexOf(r.cat)<0) cats.push(r.cat); });
+  var filterBar=null;
+  if(cfg.categoryFilter){
+    filterBar=document.createElement("div"); filterBar.className="sdlmap-filterbar";
+    [cfg.allLabel].concat(cats).forEach(function(l,i){
+      var b=document.createElement("button"); b.className="sdlmap-filter-btn"+(i===0?" active":"");
+      b.textContent=l; b.dataset.cat=i===0?"__all__":l; filterBar.appendChild(b);
+    });
+    root.appendChild(filterBar);
+  }
+
+  var body=document.createElement("div"); body.className="sdlmap-body";
+  var sidebar=null;
+  if(cfg.sidebar){ sidebar=document.createElement("div"); sidebar.className="sdlmap-sidebar"; body.appendChild(sidebar); }
+  var mapEl=document.createElement("div"); mapEl.className="sdlmap-canvas"; body.appendChild(mapEl);
+  root.appendChild(body); host.appendChild(root);
+
+  if(previewMap){ previewMap.remove(); previewMap=null; }
+  var tile=TILES[cfg.mapStyle];
+  var map=L.map(mapEl,{ scrollWheelZoom:cfg.scrollWheelZoom, zoomControl:cfg.showZoomControl });
+  previewMap=map;
+  L.tileLayer(tile.url,{attribution:tile.attr,maxZoom:19}).addTo(map);
+
+  var icon=makeIcon(cfg);
+  var group=(cfg.cluster&&L.markerClusterGroup)?L.markerClusterGroup({showCoverageOnHover:false,maxClusterRadius:45}):L.layerGroup();
+  var markers=[];
+  SAMPLE.forEach(function(rec){
+    var m=L.marker([rec.lat,rec.lng],{icon:icon});
+    m.bindPopup(popupHtml(rec,cfg),{minWidth:220,maxWidth:280,className:"sdlmap-popup-wrap"});
+    group.addLayer(m); markers.push(m);
+  });
+  map.addLayer(group);
+
+  function fit(ms){ var pts=ms.map(function(m){return m.getLatLng();});
+    if(pts.length===1) map.setView(pts[0],cfg.defaultZoom);
+    else if(pts.length) map.fitBounds(L.latLngBounds(pts),{padding:[40,40]}); }
+  if(cfg.autoFit) fit(markers); else map.setView([markers[0].getLatLng().lat,markers[0].getLatLng().lng],cfg.defaultZoom);
+
+  var cards=[];
+  if(sidebar){
+    SAMPLE.forEach(function(rec,i){
+      var card=document.createElement("div"); card.className="sdlmap-card";
+      var img=cfg.popupImage?'<div class="sdlmap-card-img" style="background-image:url('+rec.img+')"></div>':'';
+      card.innerHTML=img+'<div class="sdlmap-card-body"><div class="sdlmap-card-cat">'+rec.cat+'</div>'+
+        '<div class="sdlmap-card-title">'+rec.title+'</div><div class="sdlmap-card-addr">'+rec.addr+'</div>'+
+        '<div class="sdlmap-card-exc">'+rec.exc.slice(0,90)+'</div></div>';
+      card.addEventListener("click",function(){
+        var m=markers[i];
+        if(cfg.cluster&&group.zoomToShowLayer){ group.zoomToShowLayer(m,function(){m.openPopup();}); }
+        else { map.setView(m.getLatLng(),Math.max(map.getZoom(),14)); m.openPopup(); }
+        cards.forEach(function(c){c.classList.remove("active");}); card.classList.add("active");
+      });
+      sidebar.appendChild(card); cards.push(card);
+    });
+  }
+
+  if(filterBar){
+    filterBar.addEventListener("click",function(e){
+      var btn=e.target.closest(".sdlmap-filter-btn"); if(!btn) return;
+      filterBar.querySelectorAll(".sdlmap-filter-btn").forEach(function(b){b.classList.remove("active");});
+      btn.classList.add("active");
+      var cat=btn.dataset.cat, shown=[]; group.clearLayers();
+      SAMPLE.forEach(function(rec,i){
+        var match=cat==="__all__"||rec.cat===cat;
+        if(cards[i]) cards[i].style.display=match?"":"none";
+        if(match){ group.addLayer(markers[i]); shown.push(markers[i]); }
+      });
+      if(cfg.autoFit&&shown.length) fit(shown);
+    });
+  }
+
+  setTimeout(function(){ map.invalidateSize(); if(cfg.autoFit) fit(markers); },210);
+}
+
+/* ---------------- Conditional rows ---------------- */
+function syncVisibility(){
+  var cfg=readConfig();
+  C("excerptTagRow").style.display=(cfg.coordSource==="location")?"none":"block";
+  C("containerIdRow").style.display=(cfg.target==="native")?"none":"block";
+  C("markerColorRow").style.display=(cfg.markerType==="image")?"none":"flex";
+  C("markerImageRow").style.display=(cfg.markerType==="image")?"block":"none";
+  C("excerptLengthRow").style.display=cfg.popupExcerpt?"block":"none";
+  C("readMoreTextRow").style.display=cfg.popupReadMore?"block":"none";
+  C("viewOnMapTextRow").style.display=cfg.viewOnMap?"block":"none";
+  C("allLabelRow").style.display=cfg.categoryFilter?"block":"none";
+  C("sidebarOpts").style.display=cfg.sidebar?"block":"none";
+  C("markerSizeVal").textContent=cfg.markerSize;
+}
+
+/* ---------------- Wiring ---------------- */
+function update(){
+  syncVisibility();
+  C("codeOutput").innerHTML=highlight(generateCode());
+  renderPreview();
+}
+function togGroup(el){ el.parentElement.classList.toggle("open"); }
+function setTab(t){ document.body.className="tab-"+t;
+  document.querySelectorAll(".tab-btn").forEach(function(b){b.classList.remove("active");});
+  event.target.closest(".tab-btn").classList.add("active");
+  if(t==="preview"&&previewMap) setTimeout(function(){previewMap.invalidateSize();},200); }
+function setDevice(d){
+  C("btnDesktop").classList.toggle("active",d==="desktop");
+  C("btnMobile").classList.toggle("active",d==="mobile");
+  C("previewFrame").classList.toggle("mobile",d==="mobile");
+  if(previewMap) setTimeout(function(){previewMap.invalidateSize();},320);
+}
+function copyCode(){
+  navigator.clipboard.writeText(generateCode()).then(function(){
+    var b=C("copyBtn"); if(!b) return; var t=b.innerHTML; b.classList.add("copied");
+    b.innerHTML="✓ Copied!"; setTimeout(function(){b.classList.remove("copied"); b.innerHTML=t;},1600);
+  });
+}
+
+document.addEventListener("input",update);
+document.addEventListener("change",update);
+window.addEventListener("DOMContentLoaded",function(){
+  document.querySelector(".group").classList.add("open");
+  update();
+});
+</script>
+</body>
+</html>
