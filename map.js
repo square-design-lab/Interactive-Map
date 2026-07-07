@@ -1,64 +1,61 @@
 /* =====================================================================
-   SDL Dynamic Map  —  v1.0
+   SDL Dynamic Map  —  v1.1
    Square Design Lab
-   ---------------------------------------------------------------------
-   Renders a multi-pin Leaflet map from a Squarespace Blog collection.
-   - Takes over a native Map Block (or renders into a #container div).
-   - Coordinates come from the native Location field OR an excerpt
-     token like  [map: 40.7484, -73.9857].
-   - Optional marker clustering, category filter bar and location sidebar.
-
-   No build step, no framework, no API key. Reads window.SDL_MAP_CONFIG.
    ===================================================================== */
 (function () {
   "use strict";
 
-  /* -------------------------------------------------- Config + defaults */
+  /* -------------------------------------------------- Config */
   var USER = window.SDL_MAP_CONFIG || {};
-
   var DEFAULTS = {
-    collectionUrl: "/blog",     // Blog collection to read pins from
-    target: "auto",             // "auto" | "native" | "container"
-    containerId: "sdl-map",     // fallback container id (Code Block)
+    collectionUrl: "/blog",
+    target: "auto",
+    containerId: "sdl-map",
+    coordSource: "location",
+    excerptTag: "map",
 
-    coordSource: "location",    // "location" | "excerpt" | "auto"
-    excerptTag: "map",          // token name -> [map: lat, lng]
-
-    height: 500,                // map height in px
-    mapStyle: "carto-voyager",  // osm | carto-light | carto-dark | carto-voyager
+    height: 500,
+    mapStyle: "carto-voyager",
     defaultZoom: 13,
-    autoFit: true,              // frame all pins on load
+    autoFit: true,
     scrollWheelZoom: false,
     showZoomControl: true,
 
-    /* markers */
-    markerType: "pin",          // "pin" | "image"
+    markerType: "pin",
     markerColor: "#E5484D",
     markerSize: 42,
     markerImageUrl: "",
+    cluster: false,
 
-    /* clustering */
-    cluster: true,
-
-    /* popup */
+    popupWidth: 320,
     popupImage: true,
     popupExcerpt: true,
-    popupCategory: true,
-    popupAddress: true,
+    popupCategory: false,
+    popupAddress: false,
     popupReadMore: true,
     readMoreText: "Read more",
-    viewOnMap: true,            // Google Maps link
+    viewOnMap: false,
     viewOnMapText: "View on Google Maps",
-    excerptLength: 110,
+    excerptLength: 120,
 
-    /* category filter */
+    search: false,
+    searchPlaceholder: "Search locations…",
+
     categoryFilter: true,
-    filterSource: "categories", // "categories" | "tags"
+    categoryLabel: "",
     allLabel: "All",
 
-    /* sidebar list */
+    tagFilter: false,
+    tagLabel: "",
+    tagFilterType: "pills",
+    priceMin: 0,
+    priceMax: 1000000,
+    pricePrefix: "$",
+    priceStep: 1000,
+    allTagLabel: "All",
+
     sidebar: false,
-    sidebarPosition: "left",    // "left" | "right"
+    sidebarPosition: "left",
     sidebarWidth: 340
   };
 
@@ -67,285 +64,390 @@
   for (var u in USER) if (USER[u] !== undefined && USER[u] !== null) cfg[u] = USER[u];
 
   var TILES = {
-    "osm": {
-      url: "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",
-      attr: '&copy; OpenStreetMap contributors'
-    },
-    "carto-light": {
-      url: "https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png",
-      attr: '&copy; OpenStreetMap &copy; CARTO'
-    },
-    "carto-dark": {
-      url: "https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png",
-      attr: '&copy; OpenStreetMap &copy; CARTO'
-    },
-    "carto-voyager": {
-      url: "https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png",
-      attr: '&copy; OpenStreetMap &copy; CARTO'
-    }
+    "osm":           { url: "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",                               attr: "&copy; OpenStreetMap contributors" },
+    "carto-light":   { url: "https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png",                  attr: "&copy; OpenStreetMap &copy; CARTO" },
+    "carto-dark":    { url: "https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png",                   attr: "&copy; OpenStreetMap &copy; CARTO" },
+    "carto-voyager": { url: "https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png",        attr: "&copy; OpenStreetMap &copy; CARTO" }
   };
 
-  var LEAFLET_CSS = "https://unpkg.com/leaflet@1.9.4/dist/leaflet.css";
-  var LEAFLET_JS = "https://unpkg.com/leaflet@1.9.4/dist/leaflet.js";
-  var MC_CSS1 = "https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.css";
-  var MC_CSS2 = "https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.Default.css";
-  var MC_JS = "https://unpkg.com/leaflet.markercluster@1.5.3/dist/leaflet.markercluster.js";
-
-  /* -------------------------------------------------- Tiny helpers */
-  function log() {
-    if (window.SDL_MAP_DEBUG) console.log.apply(console, ["[SDL Map]"].concat([].slice.call(arguments)));
-  }
+  /* -------------------------------------------------- Helpers */
   function warn() { console.warn.apply(console, ["[SDL Map]"].concat([].slice.call(arguments))); }
 
   function loadCSS(href) {
     if (document.querySelector('link[href="' + href + '"]')) return;
-    var l = document.createElement("link");
-    l.rel = "stylesheet";
-    l.href = href;
+    var l = document.createElement("link"); l.rel = "stylesheet"; l.href = href;
     document.head.appendChild(l);
   }
 
   function loadJS(src) {
-    return new Promise(function (resolve, reject) {
-      var existing = document.querySelector('script[src="' + src + '"]');
-      if (existing) {
-        if (existing.dataset.loaded) return resolve();
-        existing.addEventListener("load", function () { resolve(); });
-        existing.addEventListener("error", reject);
-        return;
-      }
-      var s = document.createElement("script");
-      s.src = src;
-      s.async = true;
-      s.onload = function () { s.dataset.loaded = "1"; resolve(); };
-      s.onerror = reject;
+    return new Promise(function (res, rej) {
+      var e = document.querySelector('script[src="' + src + '"]');
+      if (e) { if (e.dataset.loaded) return res(); e.addEventListener("load", res); e.addEventListener("error", rej); return; }
+      var s = document.createElement("script"); s.src = src; s.async = true;
+      s.onload = function () { s.dataset.loaded = "1"; res(); }; s.onerror = rej;
       document.head.appendChild(s);
     });
   }
 
-  function esc(str) {
-    return String(str == null ? "" : str)
-      .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
-      .replace(/"/g, "&quot;");
+  function esc(s) {
+    return String(s == null ? "" : s)
+      .replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");
   }
 
-  function stripHtml(html) {
-    var tmp = document.createElement("div");
-    tmp.innerHTML = html || "";
-    return (tmp.textContent || tmp.innerText || "").trim();
-  }
+  function stripHtml(h) { var t = document.createElement("div"); t.innerHTML = h || ""; return (t.textContent || t.innerText || "").trim(); }
 
-  function truncate(text, n) {
-    if (!n || text.length <= n) return text;
-    return text.slice(0, n).replace(/\s+\S*$/, "") + "…";
+  function truncate(t, n) { if (!n || t.length <= n) return t; return t.slice(0, n).replace(/\s+\S*$/, "") + "…"; }
+
+  function formatPrice(n) {
+    var s = Math.round(n).toString().replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+    return (cfg.pricePrefix || "") + s;
   }
 
   /* -------------------------------------------------- Coordinate parsing */
-  // Matches  [map: 40.7484, -73.9857]  (tag name configurable)
-  function excerptCoords(rawExcerpt) {
-    if (!rawExcerpt) return null;
+  function excerptCoords(raw) {
+    if (!raw) return null;
     var tag = (cfg.excerptTag || "map").replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
     var re = new RegExp("\\[\\s*" + tag + "\\s*:\\s*(-?\\d+(?:\\.\\d+)?)\\s*,\\s*(-?\\d+(?:\\.\\d+)?)\\s*\\]", "i");
-    var m = String(rawExcerpt).match(re);
+    var m = String(raw).match(re);
     if (!m) return null;
     return { lat: parseFloat(m[1]), lng: parseFloat(m[2]) };
   }
 
   function locationCoords(loc) {
     if (!loc) return null;
-    var lat = (loc.markerLat != null) ? loc.markerLat : loc.mapLat;
-    var lng = (loc.markerLng != null) ? loc.markerLng : loc.mapLng;
+    var lat = loc.markerLat != null ? loc.markerLat : loc.mapLat;
+    var lng = loc.markerLng != null ? loc.markerLng : loc.mapLng;
     if (lat == null || lng == null) return null;
     return { lat: parseFloat(lat), lng: parseFloat(lng) };
   }
 
   function resolveCoords(item) {
-    var fromLoc = locationCoords(item.location);
-    var fromExc = excerptCoords(item.excerpt);
-    if (cfg.coordSource === "excerpt") return fromExc;
-    if (cfg.coordSource === "location") return fromLoc;
-    // auto: excerpt override wins, else native location field
-    return fromExc || fromLoc;
+    var fl = locationCoords(item.location), fe = excerptCoords(item.excerpt);
+    if (cfg.coordSource === "excerpt") return fe;
+    if (cfg.coordSource === "location") return fl;
+    return fe || fl;
   }
 
-  // Remove the [map: ...] token from displayed excerpt text
-  function cleanExcerpt(rawExcerpt) {
-    var text = stripHtml(rawExcerpt);
+  function cleanExcerpt(raw) {
+    var text = stripHtml(raw);
     var tag = (cfg.excerptTag || "map").replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-    var re = new RegExp("\\[\\s*" + tag + "\\s*:[^\\]]*\\]", "ig");
-    return text.replace(re, "").replace(/^["'\s]+/, "").trim();
+    return text.replace(new RegExp("\\[\\s*" + tag + "\\s*:[^\\]]*\\]", "ig"), "").replace(/^["'\s]+/, "").trim();
   }
 
-  /* -------------------------------------------------- Fetch collection (paginated) */
+  /* -------------------------------------------------- Price helpers */
+  function parseTagPrice(tag) {
+    var n = parseFloat(String(tag).replace(/,/g, "").replace(/[^0-9.]/g, ""));
+    return isNaN(n) ? null : n;
+  }
+
+  function getRecordPrice(rec) {
+    for (var i = 0; i < rec.tags.length; i++) {
+      var p = parseTagPrice(rec.tags[i]);
+      if (p !== null) return p;
+    }
+    return null;
+  }
+
+  /* -------------------------------------------------- Fetch (paginated) */
   function fetchAll(url) {
-    var base = url.split("?")[0];
-    var items = [];
-    function page(offset) {
-      var u = base + "?format=json&nocache=" + Date.now() + (offset ? "&offset=" + offset : "");
+    var base = url.split("?")[0], items = [];
+    function page(off) {
+      var u = base + "?format=json&nocache=" + Date.now() + (off ? "&offset=" + off : "");
       return fetch(u, { credentials: "same-origin" })
-        .then(function (r) {
-          if (!r.ok) throw new Error("HTTP " + r.status + " fetching " + base);
-          return r.json();
-        })
-        .then(function (data) {
-          var batch = data.items || [];
-          items = items.concat(batch);
-          var pg = data.pagination || {};
-          if (pg.nextPage && pg.nextPageOffset && batch.length) {
-            return page(pg.nextPageOffset);
-          }
-          return items;
+        .then(function (r) { if (!r.ok) throw new Error("HTTP " + r.status); return r.json(); })
+        .then(function (d) {
+          var b = d.items || []; items = items.concat(b);
+          var pg = d.pagination || {};
+          return (pg.nextPage && pg.nextPageOffset && b.length) ? page(pg.nextPageOffset) : items;
         });
     }
     return page(null);
   }
 
-  /* -------------------------------------------------- Build marker records */
+  /* -------------------------------------------------- Build records */
   function buildRecords(items) {
-    var records = [];
+    var recs = [];
     items.forEach(function (item) {
-      var coords = resolveCoords(item);
-      if (!coords || isNaN(coords.lat) || isNaN(coords.lng)) return; // skip pin-less posts
+      var c = resolveCoords(item);
+      if (!c || isNaN(c.lat) || isNaN(c.lng)) return;
       var loc = item.location || {};
-      var addrParts = [loc.addressLine1, loc.addressLine2, loc.addressCountry].filter(Boolean);
-      records.push({
+      var ap = [loc.addressLine1, loc.addressLine2, loc.addressCountry].filter(Boolean);
+      recs.push({
         title: item.title || "",
         url: item.fullUrl || "#",
         image: item.assetUrl || "",
         excerpt: cleanExcerpt(item.excerpt),
         categories: item.categories || [],
         tags: item.tags || [],
-        address: addrParts.join(", "),
-        addressTitle: loc.addressTitle || "",
-        lat: coords.lat,
-        lng: coords.lng
+        address: ap.join(", "),
+        lat: c.lat,
+        lng: c.lng
       });
     });
-    return records;
+    return recs;
   }
 
-  /* -------------------------------------------------- Icons */
+  /* -------------------------------------------------- Icon */
   function makeIcon() {
     var size = parseInt(cfg.markerSize, 10) || 42;
     if (cfg.markerType === "image" && cfg.markerImageUrl) {
-      return L.icon({
-        iconUrl: cfg.markerImageUrl,
-        iconSize: [size, size],
-        iconAnchor: [size / 2, size],
-        popupAnchor: [0, -size + 4],
-        className: "sdlmap-custom-icon"
-      });
+      return L.icon({ iconUrl: cfg.markerImageUrl, iconSize: [size, size], iconAnchor: [size / 2, size], popupAnchor: [0, -size + 4], className: "sdlmap-custom-icon" });
     }
-    // SVG teardrop pin, coloured via config
     var color = cfg.markerColor || "#E5484D";
-    var svg =
-      '<svg viewBox="0 0 24 32" width="' + size + '" height="' + Math.round(size * 32 / 24) + '" xmlns="http://www.w3.org/2000/svg">' +
+    var h = Math.round(size * 32 / 24);
+    var svg = '<svg viewBox="0 0 24 32" width="' + size + '" height="' + h + '" xmlns="http://www.w3.org/2000/svg">' +
       '<path d="M12 0C5.4 0 0 5.4 0 12c0 8.4 12 20 12 20s12-11.6 12-20C24 5.4 18.6 0 12 0z" fill="' + color + '"/>' +
       '<circle cx="12" cy="12" r="4.5" fill="#ffffff"/></svg>';
-    var h = Math.round(size * 32 / 24);
-    return L.divIcon({
-      html: svg,
-      className: "sdlmap-pin",
-      iconSize: [size, h],
-      iconAnchor: [size / 2, h],
-      popupAnchor: [0, -h + 6]
-    });
+    return L.divIcon({ html: svg, className: "sdlmap-pin", iconSize: [size, h], iconAnchor: [size / 2, h], popupAnchor: [0, -h + 6] });
   }
 
-  /* -------------------------------------------------- Popup HTML */
+  /* -------------------------------------------------- Popup */
   function popupHtml(rec) {
-    var parts = ['<div class="sdlmap-popup">'];
+    var p = ['<div class="sdlmap-popup">'];
     if (cfg.popupImage && rec.image) {
-      parts.push('<a class="sdlmap-popup-img" href="' + esc(rec.url) + '" style="background-image:url(' + esc(rec.image) + '?format=500w)"></a>');
+      p.push('<a class="sdlmap-popup-img" href="' + esc(rec.url) + '" target="_blank" style="background-image:url(' + esc(rec.image) + '?format=500w)"></a>');
     }
-    parts.push('<div class="sdlmap-popup-body">');
-    if (cfg.popupCategory && rec.categories.length) {
-      parts.push('<div class="sdlmap-popup-cat">' + esc(rec.categories[0]) + '</div>');
-    }
-    parts.push('<a class="sdlmap-popup-title" href="' + esc(rec.url) + '">' + esc(rec.title) + '</a>');
-    if (cfg.popupAddress && rec.address) {
-      parts.push('<div class="sdlmap-popup-addr">' + esc(rec.address) + '</div>');
-    }
-    if (cfg.popupExcerpt && rec.excerpt) {
-      parts.push('<div class="sdlmap-popup-exc">' + esc(truncate(rec.excerpt, cfg.excerptLength)) + '</div>');
-    }
+    p.push('<div class="sdlmap-popup-body">');
+    if (cfg.popupCategory && rec.categories.length) p.push('<div class="sdlmap-popup-cat">' + esc(rec.categories[0]) + '</div>');
+    p.push('<a class="sdlmap-popup-title" href="' + esc(rec.url) + '" target="_blank">' + esc(rec.title) + '</a>');
+    if (cfg.popupAddress && rec.address) p.push('<div class="sdlmap-popup-addr"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg> ' + esc(rec.address) + '</div>');
+    if (cfg.popupExcerpt && rec.excerpt) p.push('<div class="sdlmap-popup-exc">' + esc(truncate(rec.excerpt, cfg.excerptLength)) + '</div>');
     var links = [];
-    if (cfg.popupReadMore) {
-      links.push('<a class="sdlmap-popup-more" href="' + esc(rec.url) + '">' + esc(cfg.readMoreText) + '</a>');
-    }
+    if (cfg.popupReadMore) links.push('<a class="sdlmap-popup-more" href="' + esc(rec.url) + '" target="_blank">' + esc(cfg.readMoreText) + ' →</a>');
     if (cfg.viewOnMap) {
       var g = "https://www.google.com/maps/search/?api=1&query=" + rec.lat + "," + rec.lng;
       links.push('<a class="sdlmap-popup-gmap" href="' + g + '" target="_blank" rel="noopener">' + esc(cfg.viewOnMapText) + '</a>');
     }
-    if (links.length) parts.push('<div class="sdlmap-popup-links">' + links.join("") + "</div>");
-    parts.push("</div></div>");
-    return parts.join("");
+    if (links.length) p.push('<div class="sdlmap-popup-links">' + links.join("") + "</div>");
+    p.push("</div></div>");
+    return p.join("");
   }
 
-  /* -------------------------------------------------- Category list */
-  function collectCategories(records) {
-    var seen = {};
-    var list = [];
-    records.forEach(function (r) {
-      (cfg.filterSource === "tags" ? r.tags : r.categories).forEach(function (c) {
-        if (!seen[c]) { seen[c] = true; list.push(c); }
-      });
-    });
+  /* -------------------------------------------------- Collect unique values */
+  function collectUnique(recs, field) {
+    var seen = {}, list = [];
+    recs.forEach(function (r) { r[field].forEach(function (v) { if (!seen[v]) { seen[v] = true; list.push(v); } }); });
     return list;
   }
 
-  /* -------------------------------------------------- Container resolution */
+  /* -------------------------------------------------- Container */
   function resolveContainer() {
-    // native map block takeover
     if (cfg.target === "native" || cfg.target === "auto") {
-      var block = document.querySelector(".sqs-block-map .sqs-block-content, .map-block .sqs-block-content, .sqs-block-map");
-      if (block) {
-        block.innerHTML = "";
-        block.classList.add("sdlmap-took-over");
-        return block;
-      }
-      if (cfg.target === "native") {
-        warn("target=native but no Map Block found on page.");
-      }
+      var b = document.querySelector(".sqs-block-map .sqs-block-content, .map-block .sqs-block-content, .sqs-block-map");
+      if (b) { b.innerHTML = ""; b.classList.add("sdlmap-took-over"); return b; }
+      if (cfg.target === "native") warn("No Map Block found on page.");
     }
-    // explicit container div (Code Block)
     var el = document.getElementById(cfg.containerId);
     if (el) return el;
-
-    if (cfg.target === "auto") {
-      warn("No Map Block and no #" + cfg.containerId + " found. Add a Code Block with <div id=\"" + cfg.containerId + "\"></div>.");
-    }
+    warn("No Map Block and no #" + cfg.containerId + " found.");
     return null;
   }
 
-  /* -------------------------------------------------- Build the whole UI */
+  /* -------------------------------------------------- Render */
   function render(host, records) {
-    var categories = cfg.categoryFilter ? collectCategories(records) : [];
-
-    // Layout scaffold
     var root = document.createElement("div");
-    root.className = "sdlmap-root" +
-      (cfg.sidebar ? " sdlmap-has-sidebar sdlmap-sidebar-" + cfg.sidebarPosition : "");
+    root.className = "sdlmap-root" + (cfg.sidebar ? " sdlmap-has-sidebar sdlmap-sidebar-" + cfg.sidebarPosition : "");
     root.style.setProperty("--sdlmap-height", (parseInt(cfg.height, 10) || 500) + "px");
     root.style.setProperty("--sdlmap-sidebar-width", (parseInt(cfg.sidebarWidth, 10) || 340) + "px");
 
-    // Filter bar
-    var filterBar = null;
-    if (cfg.categoryFilter && categories.length) {
-      filterBar = document.createElement("div");
-      filterBar.className = "sdlmap-filterbar";
-      var btns = [cfg.allLabel].concat(categories);
-      btns.forEach(function (label, i) {
-        var b = document.createElement("button");
-        b.className = "sdlmap-filter-btn" + (i === 0 ? " active" : "");
-        b.textContent = label;
-        b.dataset.cat = i === 0 ? "__all__" : label;
-        filterBar.appendChild(b);
-      });
-      root.appendChild(filterBar);
+    /* ---------- Controls area (search + filters) ---------- */
+    var hasControls = cfg.search || cfg.categoryFilter || cfg.tagFilter;
+    var controls = null;
+    if (hasControls) {
+      controls = document.createElement("div");
+      controls.className = "sdlmap-controls";
+      root.appendChild(controls);
     }
 
-    // Body (sidebar + map)
+    /* Search */
+    var searchInput = null;
+    if (cfg.search) {
+      var searchWrap = document.createElement("div");
+      searchWrap.className = "sdlmap-search-wrap";
+      searchWrap.innerHTML =
+        '<svg class="sdlmap-search-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>' +
+        '<input class="sdlmap-search" type="text" placeholder="' + esc(cfg.searchPlaceholder) + '">' +
+        '<button class="sdlmap-search-clear" aria-label="Clear">×</button>';
+      controls.appendChild(searchWrap);
+      searchInput = searchWrap.querySelector(".sdlmap-search");
+      var clearBtn = searchWrap.querySelector(".sdlmap-search-clear");
+      clearBtn.style.display = "none";
+      searchInput.addEventListener("input", function () {
+        clearBtn.style.display = searchInput.value ? "" : "none";
+        applyFilters();
+      });
+      clearBtn.addEventListener("click", function () {
+        searchInput.value = ""; clearBtn.style.display = "none"; searchInput.focus(); applyFilters();
+      });
+    }
+
+    /* Category filter */
+    var activeCat = "__all__";
+    var catBar = null;
+    if (cfg.categoryFilter) {
+      var cats = collectUnique(records, "categories");
+      if (cats.length) {
+        var catGroup = document.createElement("div");
+        catGroup.className = "sdlmap-filter-group";
+        if (cfg.categoryLabel) {
+          var lbl = document.createElement("div");
+          lbl.className = "sdlmap-filter-label";
+          lbl.textContent = cfg.categoryLabel;
+          catGroup.appendChild(lbl);
+        }
+        catBar = document.createElement("div");
+        catBar.className = "sdlmap-filterbar";
+        [cfg.allLabel].concat(cats).forEach(function (label, i) {
+          var b = document.createElement("button");
+          b.className = "sdlmap-filter-btn" + (i === 0 ? " active" : "");
+          b.textContent = label;
+          b.dataset.val = i === 0 ? "__all__" : label;
+          b.addEventListener("click", function () {
+            catBar.querySelectorAll(".sdlmap-filter-btn").forEach(function (x) { x.classList.remove("active"); });
+            b.classList.add("active");
+            activeCat = b.dataset.val;
+            applyFilters();
+          });
+          catBar.appendChild(b);
+        });
+        catGroup.appendChild(catBar);
+        controls.appendChild(catGroup);
+      }
+    }
+
+    /* Tag filter */
+    var activeTag = "__all__";
+    var activePriceMin = cfg.priceMin, activePriceMax = cfg.priceMax;
+    var tagBar = null;
+    if (cfg.tagFilter) {
+      var tagGroup = document.createElement("div");
+      tagGroup.className = "sdlmap-filter-group";
+      if (cfg.tagLabel) {
+        var tagLbl = document.createElement("div");
+        tagLbl.className = "sdlmap-filter-label";
+        tagLbl.textContent = cfg.tagLabel;
+        tagGroup.appendChild(tagLbl);
+      }
+
+      if (cfg.tagFilterType === "price-range") {
+        /* --- Price range slider --- */
+        var prices = [];
+        records.forEach(function (r) { var p = getRecordPrice(r); if (p !== null) prices.push(p); });
+        var sMin = prices.length ? Math.min.apply(null, prices) : cfg.priceMin;
+        var sMax = prices.length ? Math.max.apply(null, prices) : cfg.priceMax;
+        sMin = Math.min(sMin, cfg.priceMin);
+        sMax = Math.max(sMax, cfg.priceMax);
+        activePriceMin = sMin;
+        activePriceMax = sMax;
+
+        var priceWrap = document.createElement("div");
+        priceWrap.className = "sdlmap-price-wrap";
+
+        var displays = document.createElement("div");
+        displays.className = "sdlmap-price-displays";
+
+        var minDisplay = document.createElement("input");
+        minDisplay.type = "text";
+        minDisplay.className = "sdlmap-price-input";
+        minDisplay.value = formatPrice(sMin);
+
+        var maxDisplay = document.createElement("input");
+        maxDisplay.type = "text";
+        maxDisplay.className = "sdlmap-price-input sdlmap-price-input-max";
+        maxDisplay.value = formatPrice(sMax);
+
+        displays.appendChild(minDisplay);
+        var sep = document.createElement("span");
+        sep.className = "sdlmap-price-sep";
+        sep.textContent = "—";
+        displays.appendChild(sep);
+        displays.appendChild(maxDisplay);
+        priceWrap.appendChild(displays);
+
+        var sliderWrap = document.createElement("div");
+        sliderWrap.className = "sdlmap-slider-wrap";
+        var track = document.createElement("div");
+        track.className = "sdlmap-slider-track";
+        var fill = document.createElement("div");
+        fill.className = "sdlmap-slider-fill";
+        track.appendChild(fill);
+
+        var inputLo = document.createElement("input");
+        inputLo.type = "range"; inputLo.className = "sdlmap-range sdlmap-range-lo";
+        inputLo.min = sMin; inputLo.max = sMax; inputLo.step = cfg.priceStep; inputLo.value = sMin;
+
+        var inputHi = document.createElement("input");
+        inputHi.type = "range"; inputHi.className = "sdlmap-range sdlmap-range-hi";
+        inputHi.min = sMin; inputHi.max = sMax; inputHi.step = cfg.priceStep; inputHi.value = sMax;
+
+        sliderWrap.appendChild(track);
+        sliderWrap.appendChild(inputLo);
+        sliderWrap.appendChild(inputHi);
+        priceWrap.appendChild(sliderWrap);
+        tagGroup.appendChild(priceWrap);
+
+        function updateFill() {
+          var lo = parseFloat(inputLo.value), hi = parseFloat(inputHi.value);
+          if (lo > hi) { var tmp = lo; lo = hi; hi = tmp; }
+          var pctLo = (lo - sMin) / (sMax - sMin) * 100;
+          var pctHi = (hi - sMin) / (sMax - sMin) * 100;
+          fill.style.left = pctLo + "%";
+          fill.style.width = (pctHi - pctLo) + "%";
+          minDisplay.value = formatPrice(lo);
+          maxDisplay.value = formatPrice(hi);
+          activePriceMin = lo;
+          activePriceMax = hi;
+        }
+        updateFill();
+
+        function onRangeInput() {
+          var lo = parseFloat(inputLo.value), hi = parseFloat(inputHi.value);
+          if (lo > hi) { if (this === inputLo) inputLo.value = hi; else inputHi.value = lo; }
+          updateFill();
+          applyFilters();
+        }
+        inputLo.addEventListener("input", onRangeInput);
+        inputHi.addEventListener("input", onRangeInput);
+
+        function parseAndApplyInput(inputEl, isMax) {
+          var raw = inputEl.value.replace(/,/g, "").replace(/[^0-9.]/g, "");
+          var n = parseFloat(raw);
+          if (!isNaN(n)) {
+            n = Math.max(sMin, Math.min(sMax, n));
+            if (isMax) inputHi.value = n; else inputLo.value = n;
+            updateFill();
+            applyFilters();
+          }
+        }
+        minDisplay.addEventListener("change", function () { parseAndApplyInput(minDisplay, false); });
+        maxDisplay.addEventListener("change", function () { parseAndApplyInput(maxDisplay, true); });
+
+      } else {
+        /* --- Tag pills --- */
+        var tags = collectUnique(records, "tags");
+        if (tags.length) {
+          tagBar = document.createElement("div");
+          tagBar.className = "sdlmap-filterbar";
+          [cfg.allTagLabel || cfg.allLabel].concat(tags).forEach(function (label, i) {
+            var b = document.createElement("button");
+            b.className = "sdlmap-filter-btn" + (i === 0 ? " active" : "");
+            b.textContent = label;
+            b.dataset.val = i === 0 ? "__all__" : label;
+            b.addEventListener("click", function () {
+              tagBar.querySelectorAll(".sdlmap-filter-btn").forEach(function (x) { x.classList.remove("active"); });
+              b.classList.add("active");
+              activeTag = b.dataset.val;
+              applyFilters();
+            });
+            tagBar.appendChild(b);
+          });
+          tagGroup.appendChild(tagBar);
+        }
+      }
+      controls.appendChild(tagGroup);
+    }
+
+    /* ---------- Body: sidebar + map ---------- */
     var body = document.createElement("div");
     body.className = "sdlmap-body";
 
@@ -360,63 +462,50 @@
     mapEl.className = "sdlmap-canvas";
     body.appendChild(mapEl);
     root.appendChild(body);
-
     host.appendChild(root);
 
-    /* ---- Leaflet map ---- */
+    /* ---------- Leaflet ---------- */
     var tile = TILES[cfg.mapStyle] || TILES["carto-voyager"];
-    var map = L.map(mapEl, {
-      scrollWheelZoom: !!cfg.scrollWheelZoom,
-      zoomControl: !!cfg.showZoomControl
-    });
+    var map = L.map(mapEl, { scrollWheelZoom: !!cfg.scrollWheelZoom, zoomControl: !!cfg.showZoomControl });
     L.tileLayer(tile.url, { attribution: tile.attr, maxZoom: 19 }).addTo(map);
 
     var icon = makeIcon();
+    var pw = parseInt(cfg.popupWidth, 10) || 320;
     var layerGroup = (cfg.cluster && L.markerClusterGroup)
       ? L.markerClusterGroup({ showCoverageOnHover: false, maxClusterRadius: 45 })
       : L.layerGroup();
 
-    var markerByIndex = [];
-    records.forEach(function (rec, i) {
+    var markers = [];
+    records.forEach(function (rec) {
       var m = L.marker([rec.lat, rec.lng], { icon: icon });
-      m.bindPopup(popupHtml(rec), { minWidth: 220, maxWidth: 280, className: "sdlmap-popup-wrap" });
-      m._sdlRec = rec;
+      m.bindPopup(popupHtml(rec), { maxWidth: pw, minWidth: Math.min(pw, 220), className: "sdlmap-popup-wrap", autoPanPaddingTopLeft: L.point(20, 20), autoPanPaddingBottomRight: L.point(20, 20) });
       layerGroup.addLayer(m);
-      markerByIndex.push(m);
+      markers.push(m);
     });
     map.addLayer(layerGroup);
 
-    function fitAll(markers) {
-      var pts = markers.map(function (m) { return m.getLatLng(); });
-      if (pts.length === 1) {
-        map.setView(pts[0], parseInt(cfg.defaultZoom, 10) || 13);
-      } else if (pts.length > 1) {
-        map.fitBounds(L.latLngBounds(pts), { padding: [40, 40] });
-      } else {
-        map.setView([20, 0], 2);
-      }
+    function fitAll(ms) {
+      if (!ms.length) return;
+      if (ms.length === 1) { map.setView(ms[0].getLatLng(), parseInt(cfg.defaultZoom, 10) || 13); return; }
+      map.fitBounds(L.latLngBounds(ms.map(function (m) { return m.getLatLng(); })), { padding: [48, 48] });
     }
-    if (cfg.autoFit) fitAll(markerByIndex);
-    else if (markerByIndex.length) map.setView(markerByIndex[0].getLatLng(), parseInt(cfg.defaultZoom, 10) || 13);
+    if (cfg.autoFit) fitAll(markers);
+    else if (markers.length) map.setView(markers[0].getLatLng(), parseInt(cfg.defaultZoom, 10) || 13);
 
-    /* ---- Sidebar list ---- */
+    /* ---------- Sidebar ---------- */
     var sidebarCards = [];
     if (sidebar) {
       records.forEach(function (rec, i) {
         var card = document.createElement("div");
         card.className = "sdlmap-card";
-        card.dataset.index = i;
         var img = (cfg.popupImage && rec.image)
-          ? '<div class="sdlmap-card-img" style="background-image:url(' + esc(rec.image) + '?format=300w)"></div>' : "";
-        var cat = (rec.categories.length ? '<div class="sdlmap-card-cat">' + esc(rec.categories[0]) + "</div>" : "");
-        var addr = (rec.address ? '<div class="sdlmap-card-addr">' + esc(rec.address) + "</div>" : "");
-        var exc = (rec.excerpt ? '<div class="sdlmap-card-exc">' + esc(truncate(rec.excerpt, 90)) + "</div>" : "");
-        card.innerHTML = img +
-          '<div class="sdlmap-card-body">' + cat +
-          '<div class="sdlmap-card-title">' + esc(rec.title) + "</div>" +
-          addr + exc + "</div>";
+          ? '<div class="sdlmap-card-img" style="background-image:url(' + esc(rec.image) + '?format=400w)"></div>' : "";
+        var cat = rec.categories.length ? '<div class="sdlmap-card-cat">' + esc(rec.categories[0]) + "</div>" : "";
+        var addr = rec.address ? '<div class="sdlmap-card-addr">' + esc(rec.address) + "</div>" : "";
+        var exc = rec.excerpt ? '<div class="sdlmap-card-exc">' + esc(truncate(rec.excerpt, 100)) + "</div>" : "";
+        card.innerHTML = img + '<div class="sdlmap-card-body">' + cat + '<div class="sdlmap-card-title">' + esc(rec.title) + "</div>" + addr + exc + "</div>";
         card.addEventListener("click", function () {
-          var m = markerByIndex[i];
+          var m = markers[i];
           if (cfg.cluster && layerGroup.zoomToShowLayer) {
             layerGroup.zoomToShowLayer(m, function () { m.openPopup(); });
           } else {
@@ -431,30 +520,46 @@
       });
     }
 
-    /* ---- Category filtering ---- */
-    if (filterBar) {
-      filterBar.addEventListener("click", function (e) {
-        var btn = e.target.closest(".sdlmap-filter-btn");
-        if (!btn) return;
-        filterBar.querySelectorAll(".sdlmap-filter-btn").forEach(function (b) { b.classList.remove("active"); });
-        btn.classList.add("active");
-        var cat = btn.dataset.cat;
-        var shown = [];
-        layerGroup.clearLayers();
-        records.forEach(function (rec, i) {
-          var pool = cfg.filterSource === "tags" ? rec.tags : rec.categories;
-          var match = cat === "__all__" || pool.indexOf(cat) !== -1;
-          if (sidebarCards[i]) sidebarCards[i].style.display = match ? "" : "none";
-          if (match) { layerGroup.addLayer(markerByIndex[i]); shown.push(markerByIndex[i]); }
-        });
-        if (cfg.autoFit) fitAll(shown);
+    /* ---------- Central filter fn ---------- */
+    function applyFilters() {
+      var query = searchInput ? searchInput.value.toLowerCase().trim() : "";
+      var shown = [];
+      layerGroup.clearLayers();
+
+      records.forEach(function (rec, i) {
+        var visible = true;
+
+        /* search */
+        if (query) {
+          var hay = (rec.title + " " + rec.excerpt + " " + rec.address + " " + rec.categories.join(" ") + " " + rec.tags.join(" ")).toLowerCase();
+          if (hay.indexOf(query) === -1) visible = false;
+        }
+
+        /* category */
+        if (visible && cfg.categoryFilter && activeCat !== "__all__") {
+          if (rec.categories.indexOf(activeCat) === -1) visible = false;
+        }
+
+        /* tag / price */
+        if (visible && cfg.tagFilter) {
+          if (cfg.tagFilterType === "price-range") {
+            var price = getRecordPrice(rec);
+            if (price !== null && (price < activePriceMin || price > activePriceMax)) visible = false;
+          } else {
+            if (activeTag !== "__all__" && rec.tags.indexOf(activeTag) === -1) visible = false;
+          }
+        }
+
+        if (sidebarCards[i]) sidebarCards[i].style.display = visible ? "" : "none";
+        if (visible) { layerGroup.addLayer(markers[i]); shown.push(markers[i]); }
       });
+
+      if (cfg.autoFit && shown.length) fitAll(shown);
     }
 
-    // Fix tile sizing after layout settles
-    setTimeout(function () { map.invalidateSize(); if (cfg.autoFit) fitAll(markerByIndex); }, 200);
+    /* ---------- Settle ---------- */
+    setTimeout(function () { map.invalidateSize(); if (cfg.autoFit) fitAll(markers); }, 250);
     window.SDL_MAP_INSTANCE = { map: map, records: records, config: cfg };
-    log("Rendered", records.length, "pins");
   }
 
   /* -------------------------------------------------- Boot */
@@ -463,31 +568,27 @@
     if (!host) return;
     host.classList.add("sdlmap-host");
 
-    // load leaflet, then optional markercluster
-    loadCSS(LEAFLET_CSS);
-    if (cfg.cluster) { loadCSS(MC_CSS1); loadCSS(MC_CSS2); }
+    loadCSS("https://unpkg.com/leaflet@1.9.4/dist/leaflet.css");
+    if (cfg.cluster) {
+      loadCSS("https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.css");
+      loadCSS("https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.Default.css");
+    }
 
-    loadJS(LEAFLET_JS)
-      .then(function () { return cfg.cluster ? loadJS(MC_JS) : null; })
+    loadJS("https://unpkg.com/leaflet@1.9.4/dist/leaflet.js")
+      .then(function () { return cfg.cluster ? loadJS("https://unpkg.com/leaflet.markercluster@1.5.3/dist/leaflet.markercluster.js") : null; })
       .then(function () { return fetchAll(cfg.collectionUrl); })
       .then(function (items) {
         var records = buildRecords(items);
         if (!records.length) {
-          warn("No posts with coordinates found in " + cfg.collectionUrl +
-            ". Check the Location field or the [" + cfg.excerptTag + ": lat, lng] excerpt token.");
+          warn("No posts with coordinates found in " + cfg.collectionUrl);
           host.innerHTML = '<div class="sdlmap-empty">No mappable locations found.</div>';
           return;
         }
         render(host, records);
       })
-      .catch(function (err) {
-        warn("Failed to build map:", err);
-      });
+      .catch(function (err) { warn("Failed:", err); });
   }
 
-  if (document.readyState === "loading") {
-    document.addEventListener("DOMContentLoaded", boot);
-  } else {
-    boot();
-  }
+  if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", boot);
+  else boot();
 })();
