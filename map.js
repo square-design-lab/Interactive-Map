@@ -61,8 +61,8 @@
     tagFilter: false,
     tagLabel: "",
     tagFilterType: "pills",   // pills | price-range
-    priceMin: 0,
-    priceMax: 1000000,
+    priceMin: null,           // null = auto from the data's lowest price
+    priceMax: null,           // null = auto from the data's highest price
     pricePrefix: "$",
     priceStep: 1000,
     allTagLabel: "All",
@@ -476,11 +476,11 @@
         if (cfg.tagFilterType === "price-range") {
           var prices = [];
           records.forEach(function (r) { var p = getRecordPrice(r); if (p !== null) prices.push(p); });
-          var sMin = prices.length ? Math.min.apply(null, prices) : cfg.priceMin;
-          var sMax = prices.length ? Math.max.apply(null, prices) : cfg.priceMax;
-          /* Honour explicit config bounds if the user widened them */
-          if (cfg.priceMin < sMin) sMin = cfg.priceMin;
-          if (cfg.priceMax > sMax) sMax = cfg.priceMax;
+          /* Bounds auto-derive from the data; explicit config only widens them. */
+          var sMin = prices.length ? Math.min.apply(null, prices) : 0;
+          var sMax = prices.length ? Math.max.apply(null, prices) : 100000;
+          if (cfg.priceMin != null && cfg.priceMin < sMin) sMin = cfg.priceMin;
+          if (cfg.priceMax != null && cfg.priceMax > sMax) sMax = cfg.priceMax;
           if (sMin === sMax) sMax = sMin + (parseInt(cfg.priceStep, 10) || 1000);
           activePriceMin = sMin; activePriceMax = sMax;
 

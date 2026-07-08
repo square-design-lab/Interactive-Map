@@ -324,9 +324,10 @@ input[type=range].slider-input::-webkit-slider-thumb{appearance:none;width:16px;
           </div>
           <div id="priceOpts" style="display:none;">
             <div class="control-row grid2">
-              <div><label>Min Price</label><input type="number" id="priceMin" value="0"></div>
-              <div><label>Max Price</label><input type="number" id="priceMax" value="1000000"></div>
+              <div><label>Min Price <span style="color:#bbb;font-weight:400;">(auto)</span></label><input type="number" id="priceMin" placeholder="auto"></div>
+              <div><label>Max Price <span style="color:#bbb;font-weight:400;">(auto)</span></label><input type="number" id="priceMax" placeholder="auto"></div>
             </div>
+            <div class="helper-text" style="margin-top:-4px;">Leave blank to fit the slider to your actual prices. Set a value only to force a wider range.</div>
             <div class="control-row grid2">
               <div><label>Currency Prefix</label><input type="text" id="pricePrefix" value="$"></div>
               <div><label>Step</label><input type="number" id="priceStep" value="1000"></div>
@@ -480,8 +481,8 @@ function readConfig(){
     tagLabel: C("tagLabel").value.trim(),
     tagFilterType: C("tagFilterType").value,
     allTagLabel: C("allTagLabel").value||"All",
-    priceMin: parseInt(C("priceMin").value,10)||0,
-    priceMax: parseInt(C("priceMax").value,10)||1000000,
+    priceMin: C("priceMin").value.trim()===""?null:parseInt(C("priceMin").value,10),
+    priceMax: C("priceMax").value.trim()===""?null:parseInt(C("priceMax").value,10),
     pricePrefix: C("pricePrefix").value||"$",
     priceStep: parseInt(C("priceStep").value,10)||1000,
     sidebar: C("sidebar").checked,
@@ -501,7 +502,7 @@ var DEFS={
   filterUI:"auto",filterButtonText:"Filters",search:false,
   searchPlaceholder:"Search locations…",categoryFilter:false,categoryLabel:"",allLabel:"All",
   tagFilter:false,tagLabel:"",tagFilterType:"pills",allTagLabel:"All",
-  priceMin:0,priceMax:1000000,pricePrefix:"$",priceStep:1000,
+  priceMin:null,priceMax:null,pricePrefix:"$",priceStep:1000,
   sidebar:false,sidebarPosition:"left",sidebarWidth:340
 };
 
@@ -641,8 +642,11 @@ function renderPreview(){
     if(cfg.tagLabel){var tl=document.createElement("div");tl.className="sdlmap-filter-label";tl.textContent=cfg.tagLabel;tg.appendChild(tl);}
     if(cfg.tagFilterType==="price-range"){
       var prices=SAMPLE.map(function(r){return parseFloat(r.tag)||0;});
-      var sMin=Math.min.apply(null,[cfg.priceMin].concat(prices));
-      var sMax=Math.max.apply(null,[cfg.priceMax].concat(prices));
+      var sMin=Math.min.apply(null,prices);
+      var sMax=Math.max.apply(null,prices);
+      if(cfg.priceMin!=null&&cfg.priceMin<sMin)sMin=cfg.priceMin;
+      if(cfg.priceMax!=null&&cfg.priceMax>sMax)sMax=cfg.priceMax;
+      if(sMin===sMax)sMax=sMin+(cfg.priceStep||1000);
       activePMin=sMin;activePMax=sMax;
       var pw=document.createElement("div");pw.className="sdlmap-price-wrap";
       var pd=document.createElement("div");pd.className="sdlmap-price-displays";
