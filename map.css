@@ -17,13 +17,146 @@
 /* =====================================================================
    CONTROLS (search + filters above map)
    ===================================================================== */
+.sdlmap-controls-area { margin-bottom: 16px; }
 .sdlmap-controls {
   display: flex;
   flex-wrap: wrap;
   align-items: flex-start;
   gap: 12px;
-  margin-bottom: 16px;
 }
+
+/* =====================================================================
+   FILTER TRIGGER BUTTON (button / auto-mobile mode)
+   ===================================================================== */
+.sdlmap-filter-trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  height: 42px;
+  padding: 0 18px;
+  border: 1.5px solid #e0e0e0;
+  border-radius: 10px;
+  background: #fff;
+  color: #1a1a1a;
+  font-family: inherit;
+  font-size: 13.5px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: border-color .16s, box-shadow .16s, background .16s;
+}
+.sdlmap-filter-trigger:hover { border-color: #bbb; background: #fafafa; }
+.sdlmap-filter-trigger svg { color: #555; }
+.sdlmap-filter-count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 19px;
+  height: 19px;
+  padding: 0 5px;
+  border-radius: 999px;
+  background: var(--sdlmap-accent);
+  color: #fff;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1;
+}
+
+/* =====================================================================
+   FILTER MODAL / POPUP
+   ===================================================================== */
+.sdlmap-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 10000;
+  display: none;
+}
+.sdlmap-modal.open { display: block; }
+.sdlmap-modal-backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(0,0,0,.42);
+  backdrop-filter: blur(1px);
+  animation: sdlmap-fade .18s ease;
+}
+.sdlmap-modal-panel {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: min(440px, calc(100vw - 32px));
+  max-height: calc(100vh - 48px);
+  display: flex;
+  flex-direction: column;
+  background: #fff;
+  border-radius: 16px;
+  box-shadow: 0 20px 60px rgba(0,0,0,.28);
+  overflow: hidden;
+  animation: sdlmap-pop .2s cubic-bezier(.2,.8,.25,1);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+}
+@keyframes sdlmap-fade { from { opacity: 0; } to { opacity: 1; } }
+@keyframes sdlmap-pop { from { opacity: 0; transform: translate(-50%, -46%) scale(.97); } to { opacity: 1; transform: translate(-50%, -50%) scale(1); } }
+.sdlmap-modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px 20px;
+  border-bottom: 1px solid #f0f0f0;
+}
+.sdlmap-modal-title { font-size: 16px; font-weight: 700; color: #111; }
+.sdlmap-modal-close {
+  background: none; border: none; cursor: pointer;
+  font-size: 26px; line-height: 1; color: #999; padding: 0 2px;
+  transition: color .15s;
+}
+.sdlmap-modal-close:hover { color: #333; }
+.sdlmap-modal-body {
+  padding: 20px;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+}
+.sdlmap-modal-body .sdlmap-controls {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 20px;
+}
+.sdlmap-modal-body .sdlmap-search-wrap { max-width: 100%; }
+.sdlmap-modal-body .sdlmap-price-wrap { max-width: 100%; }
+.sdlmap-modal-footer {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 14px 20px;
+  border-top: 1px solid #f0f0f0;
+}
+.sdlmap-modal-clear {
+  flex: 0 0 auto;
+  background: none;
+  border: none;
+  color: #666;
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  padding: 8px 4px;
+  text-decoration: underline;
+}
+.sdlmap-modal-clear:hover { color: #111; }
+.sdlmap-modal-apply {
+  flex: 1;
+  height: 44px;
+  border: none;
+  border-radius: 10px;
+  background: var(--sdlmap-accent);
+  color: #fff;
+  font-family: inherit;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: opacity .15s;
+}
+.sdlmap-modal-apply:hover { opacity: .9; }
+body.sdlmap-modal-open { overflow: hidden; }
 
 /* Search */
 .sdlmap-search-wrap {
@@ -422,4 +555,18 @@
   .sdlmap-range::-moz-range-thumb { width: 24px; height: 24px; }
 
   .sdlmap-popup-wrap .leaflet-popup-content { min-width: 240px; }
+
+  /* Filter modal → bottom sheet */
+  .sdlmap-modal-panel {
+    top: auto;
+    bottom: 0;
+    left: 0;
+    transform: none;
+    width: 100%;
+    max-height: 88vh;
+    border-radius: 18px 18px 0 0;
+    animation: sdlmap-sheet .24s cubic-bezier(.2,.8,.25,1);
+  }
+  @keyframes sdlmap-sheet { from { transform: translateY(100%); } to { transform: translateY(0); } }
+  .sdlmap-filter-trigger { width: 100%; justify-content: center; height: 46px; }
 }

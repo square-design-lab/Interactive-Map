@@ -1,17 +1,24 @@
 /* =====================================================================
-   SDL Dynamic Map  —  v1.1
+   SDL Dynamic Map  —  v1.2
    Square Design Lab
+   - Multiple maps per page (per-section config via SDL_MAP_CONFIG.sections)
+   - Section-ID targeting ("map", "map-1", ...)
+   - Native Squarespace Map Block takeover, sized to the block
+   - Filter button + popup modal (auto on mobile)
+   - Search, category filter, tag pills / price-range slider
    ===================================================================== */
 (function () {
   "use strict";
 
   /* -------------------------------------------------- Config */
-  var USER = window.SDL_MAP_CONFIG || {};
+  var RAW = window.SDL_MAP_CONFIG || {};
+  var SECTIONS = (RAW.sections && typeof RAW.sections === "object") ? RAW.sections : null;
+
   var DEFAULTS = {
     collectionUrl: "/blog",
-    target: "auto",
+    target: "auto",           // auto | native | container
     containerId: "sdl-map",
-    coordSource: "location",
+    coordSource: "location",  // location | excerpt | auto
     excerptTag: "map",
 
     mapStyle: "carto-voyager",
@@ -40,13 +47,20 @@
     search: false,
     searchPlaceholder: "Search locations…",
 
+    /* filterUI: how search + filters are presented
+       inline  = always shown above the map
+       button  = always a "Filters" button that opens a popup
+       auto    = inline on desktop, button popup on mobile (default) */
+    filterUI: "auto",
+    filterButtonText: "Filters",
+
     categoryFilter: false,
     categoryLabel: "",
     allLabel: "All",
 
     tagFilter: false,
     tagLabel: "",
-    tagFilterType: "pills",
+    tagFilterType: "pills",   // pills | price-range
     priceMin: 0,
     priceMax: 1000000,
     pricePrefix: "$",
@@ -58,15 +72,20 @@
     sidebarWidth: 340
   };
 
-  var cfg = {};
-  for (var k in DEFAULTS) cfg[k] = DEFAULTS[k];
-  for (var u in USER) if (USER[u] !== undefined && USER[u] !== null) cfg[u] = USER[u];
+  /* Build an instance config: DEFAULTS <- global keys <- section overrides */
+  function buildCfg(overrides) {
+    var c = {};
+    for (var k in DEFAULTS) c[k] = DEFAULTS[k];
+    for (var g in RAW) { if (g !== "sections" && RAW[g] !== undefined && RAW[g] !== null) c[g] = RAW[g]; }
+    if (overrides) for (var o in overrides) { if (overrides[o] !== undefined && overrides[o] !== null) c[o] = overrides[o]; }
+    return c;
+  }
 
   var TILES = {
-    "osm":           { url: "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",                               attr: "&copy; OpenStreetMap contributors" },
-    "carto-light":   { url: "https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png",                  attr: "&copy; OpenStreetMap &copy; CARTO" },
-    "carto-dark":    { url: "https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png",                   attr: "&copy; OpenStreetMap &copy; CARTO" },
-    "carto-voyager": { url: "https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png",        attr: "&copy; OpenStreetMap &copy; CARTO" }
+    "osm":           { url: "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",                        attr: "&copy; OpenStreetMap contributors" },
+    "carto-light":   { url: "https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png",           attr: "&copy; OpenStreetMap &copy; CARTO" },
+    "carto-dark":    { url: "https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png",            attr: "&copy; OpenStreetMap &copy; CARTO" },
+    "carto-voyager": { url: "https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png", attr: "&copy; OpenStreetMap &copy; CARTO" }
   };
 
   /* -------------------------------------------------- Helpers */
@@ -97,13 +116,13 @@
 
   function truncate(t, n) { if (!n || t.length <= n) return t; return t.slice(0, n).replace(/\s+\S*$/, "") + "…"; }
 
-  function formatPrice(n) {
+  function formatPrice(cfg, n) {
     var s = Math.round(n).toString().replace(/\B(?=(\d{3})+(?!\d))/g, ",");
     return (cfg.pricePrefix || "") + s;
   }
 
   /* -------------------------------------------------- Coordinate parsing */
-  function excerptCoords(raw) {
+  function excerptCoords(cfg, raw) {
     if (!raw) return null;
     var tag = (cfg.excerptTag || "map").replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
     var re = new RegExp("\\[\\s*" + tag + "\\s*:\\s*(-?\\d+(?:\\.\\d+)?)\\s*,\\s*(-?\\d+(?:\\.\\d+)?)\\s*\\]", "i");
@@ -120,14 +139,14 @@
     return { lat: parseFloat(lat), lng: parseFloat(lng) };
   }
 
-  function resolveCoords(item) {
-    var fl = locationCoords(item.location), fe = excerptCoords(item.excerpt);
+  function resolveCoords(cfg, item) {
+    var fl = locationCoords(item.location), fe = excerptCoords(cfg, item.excerpt);
     if (cfg.coordSource === "excerpt") return fe;
     if (cfg.coordSource === "location") return fl;
     return fe || fl;
   }
 
-  function cleanExcerpt(raw) {
+  function cleanExcerpt(cfg, raw) {
     var text = stripHtml(raw);
     var tag = (cfg.excerptTag || "map").replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
     return text.replace(new RegExp("\\[\\s*" + tag + "\\s*:[^\\]]*\\]", "ig"), "").replace(/^["'\s]+/, "").trim();
@@ -138,17 +157,15 @@
     var n = parseFloat(String(tag).replace(/,/g, "").replace(/[^0-9.]/g, ""));
     return isNaN(n) ? null : n;
   }
-
   function getRecordPrice(rec) {
-    for (var i = 0; i < rec.tags.length; i++) {
-      var p = parseTagPrice(rec.tags[i]);
-      if (p !== null) return p;
-    }
+    for (var i = 0; i < rec.tags.length; i++) { var p = parseTagPrice(rec.tags[i]); if (p !== null) return p; }
     return null;
   }
 
-  /* -------------------------------------------------- Fetch (paginated) */
+  /* -------------------------------------------------- Fetch (paginated, cached per URL) */
+  var fetchCache = {};
   function fetchAll(url) {
+    if (fetchCache[url]) return fetchCache[url];
     var base = url.split("?")[0], items = [];
     function page(off) {
       var u = base + "?format=json&nocache=" + Date.now() + (off ? "&offset=" + off : "");
@@ -160,14 +177,15 @@
           return (pg.nextPage && pg.nextPageOffset && b.length) ? page(pg.nextPageOffset) : items;
         });
     }
-    return page(null);
+    fetchCache[url] = page(null);
+    return fetchCache[url];
   }
 
   /* -------------------------------------------------- Build records */
-  function buildRecords(items) {
+  function buildRecords(cfg, items) {
     var recs = [];
     items.forEach(function (item) {
-      var c = resolveCoords(item);
+      var c = resolveCoords(cfg, item);
       if (!c || isNaN(c.lat) || isNaN(c.lng)) return;
       var loc = item.location || {};
       var ap = [loc.addressLine1, loc.addressLine2, loc.addressCountry].filter(Boolean);
@@ -175,7 +193,7 @@
         title: item.title || "",
         url: item.fullUrl || "#",
         image: item.assetUrl || "",
-        excerpt: cleanExcerpt(item.excerpt),
+        excerpt: cleanExcerpt(cfg, item.excerpt),
         categories: item.categories || [],
         tags: item.tags || [],
         address: ap.join(", "),
@@ -187,7 +205,7 @@
   }
 
   /* -------------------------------------------------- Icon */
-  function makeIcon() {
+  function makeIcon(cfg) {
     var size = parseInt(cfg.markerSize, 10) || 42;
     if (cfg.markerType === "image" && cfg.markerImageUrl) {
       return L.icon({ iconUrl: cfg.markerImageUrl, iconSize: [size, size], iconAnchor: [size / 2, size], popupAnchor: [0, -size + 4], className: "sdlmap-custom-icon" });
@@ -201,7 +219,7 @@
   }
 
   /* -------------------------------------------------- Popup */
-  function popupHtml(rec) {
+  function popupHtml(cfg, rec) {
     var p = ['<div class="sdlmap-popup">'];
     if (cfg.popupImage && rec.image) {
       p.push('<a class="sdlmap-popup-img" href="' + esc(rec.url) + '" target="_blank" style="background-image:url(' + esc(rec.image) + '?format=500w)"></a>');
@@ -229,234 +247,94 @@
     return list;
   }
 
-  /* -------------------------------------------------- Container */
-  function resolveContainer() {
-    if (cfg.target === "native" || cfg.target === "auto") {
-      var b = document.querySelector(".sqs-block-map .sqs-block-content, .map-block .sqs-block-content, .sqs-block-map");
-      if (b) {
-        /* Capture the native map's height (set in the Squarespace editor) so we
-           render at exactly that size instead of forcing a fixed height. */
-        var nh = b.offsetHeight;
-        if (nh && nh > 80) cfg._nativeHeight = nh;
-        b.innerHTML = ""; b.classList.add("sdlmap-took-over"); b.dataset.sdlmapNative = "1";
-        return b;
-      }
-      if (cfg.target === "native") warn("No Map Block found on page.");
+  /* -------------------------------------------------- Prepare host (measure + empty native block) */
+  function prepHost(el, isNativeBlock) {
+    var nativeHeight = 0;
+    if (isNativeBlock) {
+      var nh = el.offsetHeight;
+      if (nh && nh > 80) nativeHeight = nh;
+      el.innerHTML = "";
+      el.classList.add("sdlmap-took-over");
+      el.dataset.sdlmapNative = "1";
     }
-    var el = document.getElementById(cfg.containerId);
-    if (el) return el;
-    warn("No Map Block and no #" + cfg.containerId + " found.");
-    return null;
+    el.classList.add("sdlmap-host");
+    return nativeHeight;
   }
 
-  /* -------------------------------------------------- Render */
-  function render(host, records) {
-    /* ---------- Controls area (search + filters) ---------- */
+  /* -------------------------------------------------- Render one instance */
+  function render(host, records, cfg, nativeHeight) {
     var hasControls = cfg.search || cfg.categoryFilter || cfg.tagFilter;
 
     var root = document.createElement("div");
-    /* "plain" = a bare native-style map (no controls, no sidebar): fills the
-       native block edge-to-edge with no card framing, matching the Squarespace editor. */
     var plain = !hasControls && !cfg.sidebar;
     root.className = "sdlmap-root"
       + (cfg.sidebar ? " sdlmap-has-sidebar sdlmap-sidebar-" + cfg.sidebarPosition : "")
       + (plain ? " sdlmap-plain" : "");
-    root.style.setProperty("--sdlmap-height", (parseInt(cfg._nativeHeight, 10) || 500) + "px");
+    root.style.setProperty("--sdlmap-height", (parseInt(nativeHeight, 10) || 500) + "px");
     root.style.setProperty("--sdlmap-sidebar-width", (parseInt(cfg.sidebarWidth, 10) || 340) + "px");
 
-    var controls = null;
-    if (hasControls) {
-      controls = document.createElement("div");
-      controls.className = "sdlmap-controls";
-      root.appendChild(controls);
-    }
-
-    /* Search */
-    var searchInput = null;
-    if (cfg.search) {
-      var searchWrap = document.createElement("div");
-      searchWrap.className = "sdlmap-search-wrap";
-      searchWrap.innerHTML =
-        '<svg class="sdlmap-search-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>' +
-        '<input class="sdlmap-search" type="text" placeholder="' + esc(cfg.searchPlaceholder) + '">' +
-        '<button class="sdlmap-search-clear" aria-label="Clear">×</button>';
-      controls.appendChild(searchWrap);
-      searchInput = searchWrap.querySelector(".sdlmap-search");
-      var clearBtn = searchWrap.querySelector(".sdlmap-search-clear");
-      clearBtn.style.display = "none";
-      searchInput.addEventListener("input", function () {
-        clearBtn.style.display = searchInput.value ? "" : "none";
-        applyFilters();
-      });
-      clearBtn.addEventListener("click", function () {
-        searchInput.value = ""; clearBtn.style.display = "none"; searchInput.focus(); applyFilters();
-      });
-    }
-
-    /* Category filter */
+    /* Shared filter state */
     var activeCat = "__all__";
-    var catBar = null;
-    if (cfg.categoryFilter) {
-      var cats = collectUnique(records, "categories");
-      if (cats.length) {
-        var catGroup = document.createElement("div");
-        catGroup.className = "sdlmap-filter-group";
-        if (cfg.categoryLabel) {
-          var lbl = document.createElement("div");
-          lbl.className = "sdlmap-filter-label";
-          lbl.textContent = cfg.categoryLabel;
-          catGroup.appendChild(lbl);
-        }
-        catBar = document.createElement("div");
-        catBar.className = "sdlmap-filterbar";
-        [cfg.allLabel].concat(cats).forEach(function (label, i) {
-          var b = document.createElement("button");
-          b.className = "sdlmap-filter-btn" + (i === 0 ? " active" : "");
-          b.textContent = label;
-          b.dataset.val = i === 0 ? "__all__" : label;
-          b.addEventListener("click", function () {
-            catBar.querySelectorAll(".sdlmap-filter-btn").forEach(function (x) { x.classList.remove("active"); });
-            b.classList.add("active");
-            activeCat = b.dataset.val;
-            applyFilters();
-          });
-          catBar.appendChild(b);
-        });
-        catGroup.appendChild(catBar);
-        controls.appendChild(catGroup);
-      }
-    }
-
-    /* Tag filter */
     var activeTag = "__all__";
     var activePriceMin = cfg.priceMin, activePriceMax = cfg.priceMax;
-    var tagBar = null;
-    if (cfg.tagFilter) {
-      var tagGroup = document.createElement("div");
-      tagGroup.className = "sdlmap-filter-group";
-      if (cfg.tagLabel) {
-        var tagLbl = document.createElement("div");
-        tagLbl.className = "sdlmap-filter-label";
-        tagLbl.textContent = cfg.tagLabel;
-        tagGroup.appendChild(tagLbl);
-      }
+    var searchInput = null;
 
-      if (cfg.tagFilterType === "price-range") {
-        /* --- Price range slider --- */
-        var prices = [];
-        records.forEach(function (r) { var p = getRecordPrice(r); if (p !== null) prices.push(p); });
-        var sMin = prices.length ? Math.min.apply(null, prices) : cfg.priceMin;
-        var sMax = prices.length ? Math.max.apply(null, prices) : cfg.priceMax;
-        sMin = Math.min(sMin, cfg.priceMin);
-        sMax = Math.max(sMax, cfg.priceMax);
-        activePriceMin = sMin;
-        activePriceMax = sMax;
+    /* ---------- Controls: build inner content once, place inline or in modal ---------- */
+    var controlsArea = null, inlineSlot = null, trigger = null, modal = null, modalBody = null, countBadge = null, resultsBtn = null;
+    var controlsInner = null;
 
-        var priceWrap = document.createElement("div");
-        priceWrap.className = "sdlmap-price-wrap";
+    if (hasControls) {
+      controlsArea = document.createElement("div");
+      controlsArea.className = "sdlmap-controls-area";
 
-        var displays = document.createElement("div");
-        displays.className = "sdlmap-price-displays";
+      /* the actual filter controls live in this node; it gets moved between inline slot and modal */
+      controlsInner = document.createElement("div");
+      controlsInner.className = "sdlmap-controls";
 
-        var minDisplay = document.createElement("input");
-        minDisplay.type = "text";
-        minDisplay.className = "sdlmap-price-input";
-        minDisplay.value = formatPrice(sMin);
+      buildControls(controlsInner);
 
-        var maxDisplay = document.createElement("input");
-        maxDisplay.type = "text";
-        maxDisplay.className = "sdlmap-price-input sdlmap-price-input-max";
-        maxDisplay.value = formatPrice(sMax);
+      /* inline slot */
+      inlineSlot = document.createElement("div");
+      inlineSlot.className = "sdlmap-controls-inline";
+      controlsArea.appendChild(inlineSlot);
 
-        displays.appendChild(minDisplay);
-        var sep = document.createElement("span");
-        sep.className = "sdlmap-price-sep";
-        sep.textContent = "—";
-        displays.appendChild(sep);
-        displays.appendChild(maxDisplay);
-        priceWrap.appendChild(displays);
+      /* trigger button (button/auto mode) */
+      trigger = document.createElement("button");
+      trigger.type = "button";
+      trigger.className = "sdlmap-filter-trigger";
+      trigger.innerHTML =
+        '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"/></svg>' +
+        '<span>' + esc(cfg.filterButtonText || "Filters") + '</span>' +
+        '<span class="sdlmap-filter-count" style="display:none">0</span>';
+      countBadge = trigger.querySelector(".sdlmap-filter-count");
+      controlsArea.appendChild(trigger);
 
-        var sliderWrap = document.createElement("div");
-        sliderWrap.className = "sdlmap-slider-wrap";
-        var track = document.createElement("div");
-        track.className = "sdlmap-slider-track";
-        var fill = document.createElement("div");
-        fill.className = "sdlmap-slider-fill";
-        track.appendChild(fill);
+      /* modal */
+      modal = document.createElement("div");
+      modal.className = "sdlmap-modal";
+      modal.innerHTML =
+        '<div class="sdlmap-modal-backdrop"></div>' +
+        '<div class="sdlmap-modal-panel" role="dialog" aria-modal="true">' +
+        '  <div class="sdlmap-modal-header"><span class="sdlmap-modal-title">' + esc(cfg.filterButtonText || "Filters") + '</span>' +
+        '    <button type="button" class="sdlmap-modal-close" aria-label="Close">&times;</button></div>' +
+        '  <div class="sdlmap-modal-body"></div>' +
+        '  <div class="sdlmap-modal-footer">' +
+        '    <button type="button" class="sdlmap-modal-clear">Clear all</button>' +
+        '    <button type="button" class="sdlmap-modal-apply">Show results</button>' +
+        '  </div>' +
+        '</div>';
+      modalBody = modal.querySelector(".sdlmap-modal-body");
+      resultsBtn = modal.querySelector(".sdlmap-modal-apply");
+      controlsArea.appendChild(modal);
 
-        var inputLo = document.createElement("input");
-        inputLo.type = "range"; inputLo.className = "sdlmap-range sdlmap-range-lo";
-        inputLo.min = sMin; inputLo.max = sMax; inputLo.step = cfg.priceStep; inputLo.value = sMin;
+      root.appendChild(controlsArea);
 
-        var inputHi = document.createElement("input");
-        inputHi.type = "range"; inputHi.className = "sdlmap-range sdlmap-range-hi";
-        inputHi.min = sMin; inputHi.max = sMax; inputHi.step = cfg.priceStep; inputHi.value = sMax;
-
-        sliderWrap.appendChild(track);
-        sliderWrap.appendChild(inputLo);
-        sliderWrap.appendChild(inputHi);
-        priceWrap.appendChild(sliderWrap);
-        tagGroup.appendChild(priceWrap);
-
-        function updateFill() {
-          var lo = parseFloat(inputLo.value), hi = parseFloat(inputHi.value);
-          if (lo > hi) { var tmp = lo; lo = hi; hi = tmp; }
-          var pctLo = (lo - sMin) / (sMax - sMin) * 100;
-          var pctHi = (hi - sMin) / (sMax - sMin) * 100;
-          fill.style.left = pctLo + "%";
-          fill.style.width = (pctHi - pctLo) + "%";
-          minDisplay.value = formatPrice(lo);
-          maxDisplay.value = formatPrice(hi);
-          activePriceMin = lo;
-          activePriceMax = hi;
-        }
-        updateFill();
-
-        function onRangeInput() {
-          var lo = parseFloat(inputLo.value), hi = parseFloat(inputHi.value);
-          if (lo > hi) { if (this === inputLo) inputLo.value = hi; else inputHi.value = lo; }
-          updateFill();
-          applyFilters();
-        }
-        inputLo.addEventListener("input", onRangeInput);
-        inputHi.addEventListener("input", onRangeInput);
-
-        function parseAndApplyInput(inputEl, isMax) {
-          var raw = inputEl.value.replace(/,/g, "").replace(/[^0-9.]/g, "");
-          var n = parseFloat(raw);
-          if (!isNaN(n)) {
-            n = Math.max(sMin, Math.min(sMax, n));
-            if (isMax) inputHi.value = n; else inputLo.value = n;
-            updateFill();
-            applyFilters();
-          }
-        }
-        minDisplay.addEventListener("change", function () { parseAndApplyInput(minDisplay, false); });
-        maxDisplay.addEventListener("change", function () { parseAndApplyInput(maxDisplay, true); });
-
-      } else {
-        /* --- Tag pills --- */
-        var tags = collectUnique(records, "tags");
-        if (tags.length) {
-          tagBar = document.createElement("div");
-          tagBar.className = "sdlmap-filterbar";
-          [cfg.allTagLabel || cfg.allLabel].concat(tags).forEach(function (label, i) {
-            var b = document.createElement("button");
-            b.className = "sdlmap-filter-btn" + (i === 0 ? " active" : "");
-            b.textContent = label;
-            b.dataset.val = i === 0 ? "__all__" : label;
-            b.addEventListener("click", function () {
-              tagBar.querySelectorAll(".sdlmap-filter-btn").forEach(function (x) { x.classList.remove("active"); });
-              b.classList.add("active");
-              activeTag = b.dataset.val;
-              applyFilters();
-            });
-            tagBar.appendChild(b);
-          });
-          tagGroup.appendChild(tagBar);
-        }
-      }
-      controls.appendChild(tagGroup);
+      /* wire modal open/close */
+      trigger.addEventListener("click", openModal);
+      modal.querySelector(".sdlmap-modal-close").addEventListener("click", closeModal);
+      modal.querySelector(".sdlmap-modal-backdrop").addEventListener("click", closeModal);
+      resultsBtn.addEventListener("click", closeModal);
+      modal.querySelector(".sdlmap-modal-clear").addEventListener("click", clearAllFilters);
     }
 
     /* ---------- Body: sidebar + map ---------- */
@@ -481,7 +359,7 @@
     var map = L.map(mapEl, { scrollWheelZoom: !!cfg.scrollWheelZoom, zoomControl: !!cfg.showZoomControl });
     L.tileLayer(tile.url, { attribution: tile.attr, maxZoom: 19 }).addTo(map);
 
-    var icon = makeIcon();
+    var icon = makeIcon(cfg);
     var pw = parseInt(cfg.popupWidth, 10) || 320;
     var layerGroup = (cfg.cluster && L.markerClusterGroup)
       ? L.markerClusterGroup({ showCoverageOnHover: false, maxClusterRadius: 45 })
@@ -490,7 +368,7 @@
     var markers = [];
     records.forEach(function (rec) {
       var m = L.marker([rec.lat, rec.lng], { icon: icon });
-      m.bindPopup(popupHtml(rec), { maxWidth: pw, minWidth: Math.min(pw, 220), className: "sdlmap-popup-wrap", autoPanPaddingTopLeft: L.point(20, 20), autoPanPaddingBottomRight: L.point(20, 20) });
+      m.bindPopup(popupHtml(cfg, rec), { maxWidth: pw, minWidth: Math.min(pw, 220), className: "sdlmap-popup-wrap", autoPanPaddingTopLeft: L.point(20, 20), autoPanPaddingBottomRight: L.point(20, 20) });
       layerGroup.addLayer(m);
       markers.push(m);
     });
@@ -504,7 +382,7 @@
     if (cfg.autoFit) fitAll(markers);
     else if (markers.length) map.setView(markers[0].getLatLng(), parseInt(cfg.defaultZoom, 10) || 13);
 
-    /* ---------- Sidebar ---------- */
+    /* ---------- Sidebar cards ---------- */
     var sidebarCards = [];
     if (sidebar) {
       records.forEach(function (rec, i) {
@@ -532,27 +410,230 @@
       });
     }
 
+    /* ---------- Build filter controls into a container ---------- */
+    function buildControls(wrap) {
+      /* Search */
+      if (cfg.search) {
+        var searchWrap = document.createElement("div");
+        searchWrap.className = "sdlmap-search-wrap";
+        searchWrap.innerHTML =
+          '<svg class="sdlmap-search-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>' +
+          '<input class="sdlmap-search" type="text" placeholder="' + esc(cfg.searchPlaceholder) + '">' +
+          '<button class="sdlmap-search-clear" aria-label="Clear">×</button>';
+        wrap.appendChild(searchWrap);
+        searchInput = searchWrap.querySelector(".sdlmap-search");
+        var clearBtn = searchWrap.querySelector(".sdlmap-search-clear");
+        clearBtn.style.display = "none";
+        searchInput.addEventListener("input", function () {
+          clearBtn.style.display = searchInput.value ? "" : "none";
+          applyFilters();
+        });
+        clearBtn.addEventListener("click", function () {
+          searchInput.value = ""; clearBtn.style.display = "none"; searchInput.focus(); applyFilters();
+        });
+      }
+
+      /* Category filter */
+      if (cfg.categoryFilter) {
+        var cats = collectUnique(records, "categories");
+        if (cats.length) {
+          var catGroup = document.createElement("div");
+          catGroup.className = "sdlmap-filter-group";
+          if (cfg.categoryLabel) {
+            var lbl = document.createElement("div"); lbl.className = "sdlmap-filter-label"; lbl.textContent = cfg.categoryLabel;
+            catGroup.appendChild(lbl);
+          }
+          var catBar = document.createElement("div");
+          catBar.className = "sdlmap-filterbar";
+          [cfg.allLabel].concat(cats).forEach(function (label, i) {
+            var b = document.createElement("button");
+            b.type = "button";
+            b.className = "sdlmap-filter-btn" + (i === 0 ? " active" : "");
+            b.textContent = label;
+            b.dataset.val = i === 0 ? "__all__" : label;
+            b.addEventListener("click", function () {
+              catBar.querySelectorAll(".sdlmap-filter-btn").forEach(function (x) { x.classList.remove("active"); });
+              b.classList.add("active");
+              activeCat = b.dataset.val;
+              applyFilters();
+            });
+            catBar.appendChild(b);
+          });
+          catGroup.appendChild(catBar);
+          wrap.appendChild(catGroup);
+        }
+      }
+
+      /* Tag filter */
+      if (cfg.tagFilter) {
+        var tagGroup = document.createElement("div");
+        tagGroup.className = "sdlmap-filter-group";
+        if (cfg.tagLabel) {
+          var tagLbl = document.createElement("div"); tagLbl.className = "sdlmap-filter-label"; tagLbl.textContent = cfg.tagLabel;
+          tagGroup.appendChild(tagLbl);
+        }
+
+        if (cfg.tagFilterType === "price-range") {
+          var prices = [];
+          records.forEach(function (r) { var p = getRecordPrice(r); if (p !== null) prices.push(p); });
+          var sMin = prices.length ? Math.min.apply(null, prices) : cfg.priceMin;
+          var sMax = prices.length ? Math.max.apply(null, prices) : cfg.priceMax;
+          /* Honour explicit config bounds if the user widened them */
+          if (cfg.priceMin < sMin) sMin = cfg.priceMin;
+          if (cfg.priceMax > sMax) sMax = cfg.priceMax;
+          if (sMin === sMax) sMax = sMin + (parseInt(cfg.priceStep, 10) || 1000);
+          activePriceMin = sMin; activePriceMax = sMax;
+
+          var priceWrap = document.createElement("div");
+          priceWrap.className = "sdlmap-price-wrap";
+
+          var displays = document.createElement("div");
+          displays.className = "sdlmap-price-displays";
+          var minDisplay = document.createElement("input");
+          minDisplay.type = "text"; minDisplay.className = "sdlmap-price-input"; minDisplay.value = formatPrice(cfg, sMin);
+          var maxDisplay = document.createElement("input");
+          maxDisplay.type = "text"; maxDisplay.className = "sdlmap-price-input sdlmap-price-input-max"; maxDisplay.value = formatPrice(cfg, sMax);
+          displays.appendChild(minDisplay);
+          var sep = document.createElement("span"); sep.className = "sdlmap-price-sep"; sep.textContent = "—";
+          displays.appendChild(sep); displays.appendChild(maxDisplay);
+          priceWrap.appendChild(displays);
+
+          var sliderWrap = document.createElement("div");
+          sliderWrap.className = "sdlmap-slider-wrap";
+          var track = document.createElement("div"); track.className = "sdlmap-slider-track";
+          var fill = document.createElement("div"); fill.className = "sdlmap-slider-fill";
+          track.appendChild(fill);
+          var inputLo = document.createElement("input");
+          inputLo.type = "range"; inputLo.className = "sdlmap-range sdlmap-range-lo";
+          inputLo.min = sMin; inputLo.max = sMax; inputLo.step = cfg.priceStep; inputLo.value = sMin;
+          var inputHi = document.createElement("input");
+          inputHi.type = "range"; inputHi.className = "sdlmap-range sdlmap-range-hi";
+          inputHi.min = sMin; inputHi.max = sMax; inputHi.step = cfg.priceStep; inputHi.value = sMax;
+          sliderWrap.appendChild(track); sliderWrap.appendChild(inputLo); sliderWrap.appendChild(inputHi);
+          priceWrap.appendChild(sliderWrap);
+          tagGroup.appendChild(priceWrap);
+
+          var updateFill = function () {
+            var lo = parseFloat(inputLo.value), hi = parseFloat(inputHi.value);
+            if (lo > hi) { var tmp = lo; lo = hi; hi = tmp; }
+            var pctLo = (lo - sMin) / (sMax - sMin) * 100;
+            var pctHi = (hi - sMin) / (sMax - sMin) * 100;
+            fill.style.left = pctLo + "%"; fill.style.width = (pctHi - pctLo) + "%";
+            minDisplay.value = formatPrice(cfg, lo); maxDisplay.value = formatPrice(cfg, hi);
+            activePriceMin = lo; activePriceMax = hi;
+          };
+          updateFill();
+          var onRangeInput = function () {
+            var lo = parseFloat(inputLo.value), hi = parseFloat(inputHi.value);
+            if (lo > hi) { if (this === inputLo) inputLo.value = hi; else inputHi.value = lo; }
+            updateFill(); applyFilters();
+          };
+          inputLo.addEventListener("input", onRangeInput);
+          inputHi.addEventListener("input", onRangeInput);
+          var parseAndApplyInput = function (inputEl, isMax) {
+            var raw = inputEl.value.replace(/,/g, "").replace(/[^0-9.]/g, "");
+            var n = parseFloat(raw);
+            if (!isNaN(n)) { n = Math.max(sMin, Math.min(sMax, n)); if (isMax) inputHi.value = n; else inputLo.value = n; updateFill(); applyFilters(); }
+          };
+          minDisplay.addEventListener("change", function () { parseAndApplyInput(minDisplay, false); });
+          maxDisplay.addEventListener("change", function () { parseAndApplyInput(maxDisplay, true); });
+
+          /* expose reset for Clear-all */
+          tagGroup._sdlReset = function () { inputLo.value = sMin; inputHi.value = sMax; updateFill(); };
+        } else {
+          var tags = collectUnique(records, "tags");
+          if (tags.length) {
+            var tagBar = document.createElement("div");
+            tagBar.className = "sdlmap-filterbar";
+            [cfg.allTagLabel || cfg.allLabel].concat(tags).forEach(function (label, i) {
+              var b = document.createElement("button");
+              b.type = "button";
+              b.className = "sdlmap-filter-btn" + (i === 0 ? " active" : "");
+              b.textContent = label;
+              b.dataset.val = i === 0 ? "__all__" : label;
+              b.addEventListener("click", function () {
+                tagBar.querySelectorAll(".sdlmap-filter-btn").forEach(function (x) { x.classList.remove("active"); });
+                b.classList.add("active");
+                activeTag = b.dataset.val;
+                applyFilters();
+              });
+              tagBar.appendChild(b);
+            });
+            tagGroup.appendChild(tagBar);
+            tagGroup._sdlReset = function () {
+              tagBar.querySelectorAll(".sdlmap-filter-btn").forEach(function (x, i) { x.classList.toggle("active", i === 0); });
+              activeTag = "__all__";
+            };
+          }
+        }
+        wrap._tagGroup = tagGroup;
+        wrap.appendChild(tagGroup);
+      }
+    }
+
+    /* ---------- Clear all filters ---------- */
+    function clearAllFilters() {
+      if (searchInput) { searchInput.value = ""; var cb = searchInput.parentNode.querySelector(".sdlmap-search-clear"); if (cb) cb.style.display = "none"; }
+      var catBar = controlsInner.querySelector(".sdlmap-filter-group .sdlmap-filterbar");
+      controlsInner.querySelectorAll(".sdlmap-filter-btn").forEach(function (x) { x.classList.remove("active"); });
+      var firstCat = controlsInner.querySelector(".sdlmap-filter-group .sdlmap-filterbar .sdlmap-filter-btn");
+      if (firstCat) firstCat.classList.add("active");
+      activeCat = "__all__"; activeTag = "__all__";
+      if (controlsInner._tagGroup && controlsInner._tagGroup._sdlReset) controlsInner._tagGroup._sdlReset();
+      applyFilters();
+    }
+
+    /* ---------- Modal open/close + layout ---------- */
+    function openModal() { if (modal) { modalBody.appendChild(controlsInner); modal.classList.add("open"); document.body.classList.add("sdlmap-modal-open"); } }
+    function closeModal() { if (modal) { modal.classList.remove("open"); document.body.classList.remove("sdlmap-modal-open"); } }
+
+    var mq = window.matchMedia("(max-width: 640px)");
+    function layoutControls() {
+      if (!hasControls) return;
+      var useButton = cfg.filterUI === "button" || (cfg.filterUI === "auto" && mq.matches);
+      if (useButton) {
+        trigger.style.display = "";
+        inlineSlot.style.display = "none";
+        /* keep controlsInner in modal body (hidden until opened) unless modal currently open */
+        if (!modal.classList.contains("open")) modalBody.appendChild(controlsInner);
+      } else {
+        trigger.style.display = "none";
+        inlineSlot.style.display = "";
+        inlineSlot.appendChild(controlsInner);
+        closeModal();
+      }
+    }
+    if (hasControls) {
+      layoutControls();
+      if (mq.addEventListener) mq.addEventListener("change", layoutControls);
+      else if (mq.addListener) mq.addListener(layoutControls);
+    }
+
     /* ---------- Central filter fn ---------- */
+    function countActive() {
+      var n = 0;
+      if (searchInput && searchInput.value.trim()) n++;
+      if (cfg.categoryFilter && activeCat !== "__all__") n++;
+      if (cfg.tagFilter) {
+        if (cfg.tagFilterType === "price-range") { /* count only if narrowed - handled in applyFilters via flag */ }
+        else if (activeTag !== "__all__") n++;
+      }
+      return n;
+    }
+
     function applyFilters() {
       var query = searchInput ? searchInput.value.toLowerCase().trim() : "";
       var shown = [];
       layerGroup.clearLayers();
-
       records.forEach(function (rec, i) {
         var visible = true;
-
-        /* search */
         if (query) {
           var hay = (rec.title + " " + rec.excerpt + " " + rec.address + " " + rec.categories.join(" ") + " " + rec.tags.join(" ")).toLowerCase();
           if (hay.indexOf(query) === -1) visible = false;
         }
-
-        /* category */
         if (visible && cfg.categoryFilter && activeCat !== "__all__") {
           if (rec.categories.indexOf(activeCat) === -1) visible = false;
         }
-
-        /* tag / price */
         if (visible && cfg.tagFilter) {
           if (cfg.tagFilterType === "price-range") {
             var price = getRecordPrice(rec);
@@ -561,44 +642,116 @@
             if (activeTag !== "__all__" && rec.tags.indexOf(activeTag) === -1) visible = false;
           }
         }
-
         if (sidebarCards[i]) sidebarCards[i].style.display = visible ? "" : "none";
         if (visible) { layerGroup.addLayer(markers[i]); shown.push(markers[i]); }
       });
-
       if (cfg.autoFit && shown.length) fitAll(shown);
+
+      /* update filter count badge + results button */
+      if (countBadge) {
+        var n = countActive();
+        countBadge.textContent = n;
+        countBadge.style.display = n ? "" : "none";
+      }
+      if (resultsBtn) resultsBtn.textContent = "Show " + shown.length + " result" + (shown.length === 1 ? "" : "s");
     }
+    if (resultsBtn) resultsBtn.textContent = "Show " + records.length + " results";
 
     /* ---------- Settle ---------- */
     setTimeout(function () { map.invalidateSize(); if (cfg.autoFit) fitAll(markers); }, 250);
-    window.SDL_MAP_INSTANCE = { map: map, records: records, config: cfg };
+
+    return { map: map, records: records, config: cfg, host: host };
+  }
+
+  /* -------------------------------------------------- Gather targets */
+  function nativeBlockIn(scope) {
+    return scope.querySelector(".sqs-block-map .sqs-block-content, .map-block .sqs-block-content, .sqs-block-map, .map-block");
+  }
+
+  function gatherTargets() {
+    var targets = [];
+
+    if (SECTIONS) {
+      /* Per-section config: only take over the listed sections (others stay native). */
+      Object.keys(SECTIONS).forEach(function (sid) {
+        var cfg = buildCfg(SECTIONS[sid]);
+        var sec = document.getElementById(sid) || document.querySelector('[data-section-id="' + sid + '"]');
+        var block = null;
+        if (sec) block = nativeBlockIn(sec);
+        if (!block && cfg.target === "container") block = document.getElementById(cfg.containerId);
+        if (!block && sec) block = sec; /* fall back to the section itself */
+        if (!block) { warn("No map target for section '" + sid + "'"); return; }
+        var isNative = block.classList.contains("sqs-block-map") || block.classList.contains("map-block") || block.classList.contains("sqs-block-content");
+        targets.push({ el: block, cfg: cfg, isNative: isNative });
+      });
+      return targets;
+    }
+
+    /* No per-section config. */
+    var globalCfg = buildCfg(null);
+
+    if (globalCfg.target === "container") {
+      var el = document.getElementById(globalCfg.containerId);
+      if (el) targets.push({ el: el, cfg: globalCfg, isNative: false });
+      else warn("No #" + globalCfg.containerId + " container found.");
+      return targets;
+    }
+
+    /* Take over every native Map Block on the page. */
+    var blocks = document.querySelectorAll(".sqs-block-map, .map-block");
+    if (blocks.length) {
+      Array.prototype.forEach.call(blocks, function (b) {
+        var inner = b.querySelector(".sqs-block-content") || b;
+        targets.push({ el: inner, cfg: globalCfg, isNative: true });
+      });
+      return targets;
+    }
+
+    /* Fallback: Code Block container. */
+    var cel = document.getElementById(globalCfg.containerId);
+    if (cel) targets.push({ el: cel, cfg: globalCfg, isNative: false });
+    else warn("No Map Block and no #" + globalCfg.containerId + " found.");
+    return targets;
   }
 
   /* -------------------------------------------------- Boot */
   function boot() {
-    var host = resolveContainer();
-    if (!host) return;
-    host.classList.add("sdlmap-host");
+    if (window.__SDL_MAP_BOOTED) return;
+    window.__SDL_MAP_BOOTED = true;
+
+    var targets = gatherTargets();
+    if (!targets.length) return;
+
+    var anyCluster = targets.some(function (t) { return t.cfg.cluster; });
 
     loadCSS("https://unpkg.com/leaflet@1.9.4/dist/leaflet.css");
-    if (cfg.cluster) {
+    if (anyCluster) {
       loadCSS("https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.css");
       loadCSS("https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.Default.css");
     }
 
     loadJS("https://unpkg.com/leaflet@1.9.4/dist/leaflet.js")
-      .then(function () { return cfg.cluster ? loadJS("https://unpkg.com/leaflet.markercluster@1.5.3/dist/leaflet.markercluster.js") : null; })
-      .then(function () { return fetchAll(cfg.collectionUrl); })
-      .then(function (items) {
-        var records = buildRecords(items);
-        if (!records.length) {
-          warn("No posts with coordinates found in " + cfg.collectionUrl);
-          host.innerHTML = '<div class="sdlmap-empty">No mappable locations found.</div>';
-          return;
-        }
-        render(host, records);
+      .then(function () { return anyCluster ? loadJS("https://unpkg.com/leaflet.markercluster@1.5.3/dist/leaflet.markercluster.js") : null; })
+      .then(function () {
+        window.SDL_MAP_INSTANCES = window.SDL_MAP_INSTANCES || [];
+        targets.forEach(function (t) {
+          fetchAll(t.cfg.collectionUrl)
+            .then(function (items) {
+              var records = buildRecords(t.cfg, items);
+              var nativeHeight = prepHost(t.el, t.isNative);
+              if (!records.length) {
+                warn("No posts with coordinates in " + t.cfg.collectionUrl);
+                t.el.innerHTML = '<div class="sdlmap-empty">No mappable locations found.</div>';
+                return;
+              }
+              var inst = render(t.el, records, t.cfg, nativeHeight);
+              window.SDL_MAP_INSTANCES.push(inst);
+              window.SDL_MAP_INSTANCE = inst; /* back-compat: last instance */
+            })
+            .catch(function (err) { warn("Failed for target:", err); });
+        });
       })
-      .catch(function (err) { warn("Failed:", err); });
+      .catch(function (err) { warn("Leaflet load failed:", err); });
   }
 
   if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", boot);

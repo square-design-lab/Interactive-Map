@@ -90,6 +90,9 @@ input[type=range].slider-input::-webkit-slider-thumb{appearance:none;width:16px;
 #previewFrame{background:#fff;width:100%;max-width:1060px;min-height:540px;box-shadow:var(--shadow-lg);border-radius:var(--radius-lg);padding:36px;transition:width .3s cubic-bezier(.25,.8,.25,1);display:flex;flex-direction:column;border:1px solid var(--border-light);}
 #previewFrame.mobile{width:390px;padding:20px;border-radius:28px;border:8px solid #333;}
 #previewFrame.tablet{width:768px;}
+/* Contain the filter popup inside the preview box (plugin uses position:fixed live) */
+#mapPreview{position:relative;}
+#mapPreview .sdlmap-modal{position:absolute;}
 .preview-label{font-size:11px;text-transform:uppercase;letter-spacing:.08em;color:#bbb;margin-bottom:14px;font-weight:600;}
 
 .code-drawer{height:220px;background:#0D0D0D;color:#E1E1E1;display:flex;flex-direction:column;border-top:1px solid var(--border-light);font-family:'JetBrains Mono',monospace;flex-shrink:0;}
@@ -171,6 +174,11 @@ input[type=range].slider-input::-webkit-slider-thumb{appearance:none;width:16px;
       <div class="group-header" onclick="togGroup(this)">Placement</div>
       <div class="group-body">
         <div class="control-row">
+          <label>Target Section ID</label>
+          <input type="text" id="sectionId" value="" placeholder="all map blocks">
+          <div class="helper-text">Add a <b>Section ID</b> in the Squarespace editor (e.g. <code>map</code>, <code>map-1</code>) and enter it here to configure that map. Leave blank to apply to <b>every</b> Map Block on the page. Add one snippet per section for multiple different maps.</div>
+        </div>
+        <div class="control-row">
           <label>Render Target</label>
           <select id="target">
             <option value="auto" selected>Auto (native Map Block → Code Block fallback)</option>
@@ -235,6 +243,26 @@ input[type=range].slider-input::-webkit-slider-thumb{appearance:none;width:16px;
         <div class="control-row">
           <label>Size — <span id="markerSizeVal">42</span>px</label>
           <input type="range" id="markerSize" min="20" max="80" value="42" class="slider-input">
+        </div>
+      </div>
+    </div>
+
+    <!-- FILTER DISPLAY -->
+    <div class="group">
+      <div class="group-header" onclick="togGroup(this)">Filter Display</div>
+      <div class="group-body">
+        <div class="control-row">
+          <label>Search &amp; filters layout</label>
+          <select id="filterUI">
+            <option value="auto" selected>Auto — inline on desktop, button popup on mobile</option>
+            <option value="inline">Always inline (above the map)</option>
+            <option value="button">Always a "Filters" button + popup</option>
+          </select>
+          <div class="helper-text">Controls how the search bar and filters appear. The button opens a popup with all filters — great for mobile.</div>
+        </div>
+        <div class="control-row" id="filterBtnTextRow">
+          <label>Filter button text</label>
+          <input type="text" id="filterButtonText" value="Filters">
         </div>
       </div>
     </div>
@@ -441,6 +469,8 @@ function readConfig(){
     readMoreText: C("readMoreText").value,
     viewOnMap: C("viewOnMap").checked,
     viewOnMapText: C("viewOnMapText").value,
+    filterUI: C("filterUI").value,
+    filterButtonText: C("filterButtonText").value||"Filters",
     search: C("search").checked,
     searchPlaceholder: C("searchPlaceholder").value||"Search locations…",
     categoryFilter: C("categoryFilter").checked,
@@ -467,7 +497,8 @@ var DEFS={
   showZoomControl:true,cluster:false,markerType:"pin",markerColor:"#e5484d",markerSize:42,
   markerImageUrl:"",popupWidth:320,popupImage:true,popupCategory:false,popupAddress:false,
   popupExcerpt:true,excerptLength:120,popupReadMore:true,readMoreText:"Read more",
-  viewOnMap:false,viewOnMapText:"View on Google Maps",search:false,
+  viewOnMap:false,viewOnMapText:"View on Google Maps",
+  filterUI:"auto",filterButtonText:"Filters",search:false,
   searchPlaceholder:"Search locations…",categoryFilter:false,categoryLabel:"",allLabel:"All",
   tagFilter:false,tagLabel:"",tagFilterType:"pills",allTagLabel:"All",
   priceMin:0,priceMax:1000000,pricePrefix:"$",priceStep:1000,
@@ -490,11 +521,24 @@ function buildConfigObj(cfg){
 function generateCode(){
   var cfg=readConfig();
   var obj=buildConfigObj(cfg);
+  var sid=C("sectionId").value.trim();
   var json=JSON.stringify(obj,null,2);
-  return '<!-- SDL Dynamic Map — Square Design Lab -->\n'+
-    '<link rel="stylesheet" href="'+CDN+'map.css">\n'+
-    '<script>\nwindow.SDL_MAP_CONFIG = '+json+';\n<\/script>\n'+
-    '<script src="'+CDN+'map.js" defer><\/script>';
+  var head='<!-- SDL Dynamic Map — Square Design Lab -->\n'+
+    '<link rel="stylesheet" href="'+CDN+'map.css">\n';
+  var loader='<script src="'+CDN+'map.js" defer><\/script>';
+  if(sid){
+    /* Per-section config: self-merging so several snippets can coexist on one page. */
+    var jsonInline=JSON.stringify(obj);
+    return head+
+      '<script>\n'+
+      '  window.SDL_MAP_CONFIG = window.SDL_MAP_CONFIG || {};\n'+
+      '  window.SDL_MAP_CONFIG.sections = window.SDL_MAP_CONFIG.sections || {};\n'+
+      '  window.SDL_MAP_CONFIG.sections["'+sid+'"] = '+jsonInline+';\n'+
+      '<\/script>\n'+loader;
+  }
+  /* No section id: single global config applied to every Map Block on the page. */
+  return head+
+    '<script>\nwindow.SDL_MAP_CONFIG = '+json+';\n<\/script>\n'+loader;
 }
 
 function highlight(code){
@@ -510,6 +554,7 @@ function highlight(code){
 
 /* ---- Preview map ---- */
 var previewMap=null;
+var previewDevice="desktop";
 function formatP(n,prefix){return (prefix||"$")+Math.round(n).toString().replace(/\B(?=(\d{3})+(?!\d))/g,",");}
 
 function makeIcon(cfg){
@@ -556,7 +601,7 @@ function renderPreview(){
   root.style.setProperty("--sdlmap-sidebar-width",cfg.sidebarWidth+"px");
 
   var controls=null;
-  if(hasControls){controls=document.createElement("div");controls.className="sdlmap-controls";root.appendChild(controls);}
+  if(hasControls){controls=document.createElement("div");controls.className="sdlmap-controls";}
 
   /* Search */
   var searchInput=null;
@@ -637,6 +682,27 @@ function renderPreview(){
       tg.appendChild(tb);
     }
     controls.appendChild(tg);
+  }
+
+  /* Place controls: inline, or behind a Filters button + popup */
+  if(hasControls){
+    var area=document.createElement("div");area.className="sdlmap-controls-area";
+    var useButton=cfg.filterUI==="button"||(cfg.filterUI==="auto"&&previewDevice==="mobile");
+    if(useButton){
+      var trg=document.createElement("button");trg.type="button";trg.className="sdlmap-filter-trigger";
+      trg.innerHTML='<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"/></svg><span>'+esc(cfg.filterButtonText||"Filters")+'</span>';
+      var modal=document.createElement("div");modal.className="sdlmap-modal";
+      modal.innerHTML='<div class="sdlmap-modal-backdrop"></div><div class="sdlmap-modal-panel"><div class="sdlmap-modal-header"><span class="sdlmap-modal-title">'+esc(cfg.filterButtonText||"Filters")+'</span><button type="button" class="sdlmap-modal-close">&times;</button></div><div class="sdlmap-modal-body"></div><div class="sdlmap-modal-footer"><button type="button" class="sdlmap-modal-clear">Clear all</button><button type="button" class="sdlmap-modal-apply">Show results</button></div></div>';
+      modal.querySelector(".sdlmap-modal-body").appendChild(controls);
+      trg.addEventListener("click",function(){modal.classList.add("open");});
+      modal.querySelector(".sdlmap-modal-close").addEventListener("click",function(){modal.classList.remove("open");});
+      modal.querySelector(".sdlmap-modal-backdrop").addEventListener("click",function(){modal.classList.remove("open");});
+      modal.querySelector(".sdlmap-modal-apply").addEventListener("click",function(){modal.classList.remove("open");});
+      area.appendChild(trg);area.appendChild(modal);
+    } else {
+      area.appendChild(controls);
+    }
+    root.appendChild(area);
   }
 
   /* Body */
@@ -736,8 +802,10 @@ function setTab(t,btn){
   if(t==="preview") setTimeout(renderPreview, 50);
 }
 function setDevice(d){
+  previewDevice=d;
   ["desktop","tablet","mobile"].forEach(function(x){C("btn"+x.charAt(0).toUpperCase()+x.slice(1)).classList.toggle("active",d===x);});
   var f=C("previewFrame");f.classList.remove("mobile","tablet");if(d!=="desktop")f.classList.add(d);
+  renderPreview();
   if(previewMap)setTimeout(function(){previewMap.invalidateSize();},320);
 }
 function copyCode(){
